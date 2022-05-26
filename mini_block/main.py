@@ -21,7 +21,7 @@ parser.add_argument('--device', type=int, default=0, help='the cuda device numbe
 parser.add_argument('--epochs', type=int, default=100, help='custom the training epochs')
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128)
-parser.add_argument('--times', type=int, default=0)
+parser.add_argument('--times', type=int, default=0, help='do repeat experiments')
 
 args = parser.parse_args()
 
