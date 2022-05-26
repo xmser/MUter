@@ -4,7 +4,7 @@ import argparse
 from Train import Neter
 from Remover import MUterRemover, NewtonRemover, InfluenceRemover, FisherRemover
 from Recorder import Recorder
-from datamarket import Dataer
+from data_utils import Dataer
 """
 mainly code for machine unlearning, un see the detail of
 the concrete code about how to calculate the matrix and its inverse
