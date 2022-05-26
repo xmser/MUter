@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--dataset', type=str, default='Cifar10')
 parser.add_argument('--adv', type=str, default='PGD')
-parser.add_argument('remove_batch', type=int, default=100)
+parser.add_argument('remove_batch', type=int, default=100, help='using the mini batch remove method')
 parser.add_argument('--remove_numbers', type=int, default=2000, help='total number for delete')
 parser.add_argument('--device', type=int, default=0, help='the cuda device number')
 parser.add_argument('--epochs', type=int, default=100)
