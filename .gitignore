@@ -1,4 +1,3 @@
 /data
 /NNmodel
-/mini_block/data/cifar-10-python
-/mini_block/data/mnist
+/mini_block/data
