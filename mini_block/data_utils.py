@@ -29,6 +29,25 @@ class SelfSampler(Sampler):
         
         return len(self.indices)
 
+class SubSampler(Sampler):
+
+    def __init__(self, dataset, masked_id):
+        """
+        Args:
+            masked_id (list): point what class to be omit.
+        """
+        
+        lenth = int(len(dataset))
+        self.indices = [index for index in range(lenth) if dataset.target not in masked_id]
+
+    def __iter__(self):
+        
+        return iter(self.indices)
+
+    def __len__(self):
+
+        return len(self.indices)
+
 
 class Dataer:
 
@@ -60,30 +79,47 @@ class Dataer:
             ]
         else:
             raise Exception('No such dataset called {}'.format(dataset_name))
-
-    def get_loader(self, head=-1, rear=-1, batch_size=128, isTrain=True, isAdv=False):
         
-        if isAdv == False:
-            if head == -1 and rear == -1:    
-                if isTrain:
-                    return DataLoader(self.datasets[0], batch_size=batch_size)
+        self.class_num = {
+            'Cifar10': 10,
+            'Mnist': 10,
+        }
+
+    def get_loader(self, head=-1, rear=-1, batch_size=128, isTrain=True, isAdv=False, isClassType=False, isGetOne=False, id=[0, ]):
+
+        if isClassType == False:
+            if isAdv == False:
+                if head == -1 and rear == -1:    
+                    if isTrain:
+                        return DataLoader(self.datasets[0], batch_size=batch_size)
+                    else:
+                        return DataLoader(self.datasets[1], batch_size=batch_size)
                 else:
-                    return DataLoader(self.datasets[1], batch_size=batch_size)
+                    if isTrain:
+                        self_sampler = SelfSampler(self.datasets[0], head=head, rear=rear)
+                        return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
+                    else:
+                        self_sampler = SelfSampler(self.datasets[1], head=head, rear=rear)
+                        return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
             else:
-                if isTrain:
-                    self_sampler = SelfSampler(self.datasets[0], head=head, rear=rear)
-                    return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
+                adv_data = self.get_adv_samples()
+                if head == -1 and rear == -1:    
+                    return DataLoader(adv_data, batch_size=batch_size)
                 else:
-                    self_samper = SelfSampler(self.datasets[1], head=head, rear=rear)
-                    return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
+                    self_sampler = SelfSampler(adv_data, head=head, rear=rear)
+                    return DataLoader(adv_data, batch_size=batch_size, sampler=self_sampler)
         else:
-            adv_data = self.get_adv_samples()
-            if head == -1 and rear == -1:    
-                return DataLoader(adv_data, batch_size=batch_size)
+            if isAdv:
+                adv_data = self.get_adv_samples()
+                if isGetOne:
+                    return self.get_loader_ForOneClass(present_id=id, batch_size=batch_size, isTrain=isTrain, adv_data=adv_data, isAdv=isAdv)
+                else:
+                    return self.get_loader_MaskOneClass(masked_id=id, batch_size=batch_size, isTrain=isTrain, adv_data=adv_data, isAdv=isAdv)
             else:
-                self_sampler = SelfSampler(adv_data, head=head, rear=rear)
-                return DataLoader(adv_data, batch_size=batch_size, sampler=self_sampler)
-      
+                if isGetOne:
+                    return self.get_loader_ForOneClass(present_id=id, batch_size=batch_size, isTrain=isTrain)
+                else:
+                    return self.get_loader_MaskOneClass(masked_id=id, batch_size=batch_size, isTrain=isTrain)
     
     def get_adv_samples(self):
         
@@ -99,7 +135,40 @@ class Dataer:
 
         return adv_data
 
+    def get_loader_MaskOneClass(self, masked_id=[0, ], batch_size=128, isTrain=True, adv_data=None, isAdv=False):
+        """
+        Args:
+            masked_id (list, optional): be a list, point what class or classes to be omit.
+        """
 
+        if isAdv == False:
+            if isTrain:
+                sub_sampler = SubSampler(self.datasets[0], masked_id=masked_id)
+                return DataLoader(self.datasets[0], batch_size=batch_size, sampler=sub_sampler)
+            else:
+                sub_sampler = SubSampler(self.datasets[1], masked_id=masked_id)
+                return DataLoader(self.datasets[1], batch_size=batch_size, sampler=sub_sampler)
+        else:
+            sub_sampler = SubSampler(adv_data, masked_id=masked_id)
+            return DataLoader(adv_data, batch_size=batch_size, sampler=sub_sampler)
+
+    def get_loader_ForOneClass(self, present_id=[0, ], batch_size=128, isTrain=True, adv_data=None, isAdv=False):
+        """
+        Args:
+            present_id (list, optional): point chose what class or classes to be present.
+        """
+        masked_id = [index for index in range(self.class_num[self.dataset_name]) if index not in present_id]
+        
+        if isAdv == False:
+            if isTrain:
+                sub_sampler = SubSampler(self.datasets[0], masked_id=masked_id)
+                return DataLoader(self.datasets[0], batch_size=batch_size, sampler=sub_sampler)
+            else:
+                sub_sampler = SubSampler(self.datasets[1], masked_id=masked_id)
+                return DataLoader(self.datasets[1], batch_size=batch_size, sampler=sub_sampler)
+        else:
+            sub_sampler = SubSampler(adv_data, masked_id=masked_id)
+            return DataLoader(adv_data, batch_size=batch_size, sampler=sub_sampler)
 
     def test(self):
 
