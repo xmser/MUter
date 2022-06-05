@@ -1,6 +1,4 @@
-from cProfile import label
-from ssl import OPENSSL_VERSION_INFO
-from time import sleep
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -276,8 +274,11 @@ class AllFCModel(nn.Module):
 
 if __name__ == "__main__":
     device = 'cuda'
-    model = vgg16().to(device)
+    os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+    # model = vgg16().to(device)
+    model = ResNet(ResidualBlock).to(device)
     print(model)
+    print('total params : {}'.format(total_param(model)))
     # batchsize = 128
     # dataer = Dataer(dataset_name='Mnist')
     # device = 'cuda'

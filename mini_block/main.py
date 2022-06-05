@@ -1,5 +1,7 @@
+from email.policy import default
 import torch
 import argparse
+import os
 
 from Train import Neter
 from Remover import MUterRemover, NewtonRemover, InfluenceRemover, FisherRemover
@@ -15,15 +17,18 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--dataset', type=str, default='Cifar10')
 parser.add_argument('--adv', type=str, default='PGD')
-parser.add_argument('remove_batch', type=int, default=100, help='using the mini batch remove method')
+parser.add_argument('--remove_batch', type=int, default=100, help='using the mini batch remove method')
 parser.add_argument('--remove_numbers', type=int, default=2000, help='total number for delete')
 parser.add_argument('--device', type=int, default=0, help='the cuda device number')
-parser.add_argument('--epochs', type=int, default=100, help='custom the training epochs')
+parser.add_argument('--epochs', type=int, default=300, help='custom the training epochs')
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
 parser.add_argument('--times', type=int, default=0, help='do repeat experiments')
+parser.add_argument('--gpu_id', default=1, type=int)
 
 args = parser.parse_args()
+
+
 
 """
 1) traninig a roubust model for unlearning (adding SISA)
@@ -33,6 +38,7 @@ args = parser.parse_args()
 """
 
 ### pre work
+os.environ['CUDA_VISIBLE_DEVICES'] = '{}'.format(args.gpu_id)
 recorder = Recorder(args=args)
 
 #####
@@ -41,9 +47,9 @@ recorder = Recorder(args=args)
 
 dataer = Dataer(dataset_name=args.dataset)
 neter = Neter(dataer=dataer, args=args)
-neter.training(epochs=args.epochs, lr=args.lr, batch_size=args.batchsize, isAdv=False)
-
-
+time = neter.training(epochs=args.epochs, lr=args.lr, batch_size=args.batchsize, isAdv=True)
+print('time {:.2f}'.format(time))
+"""
 #####
 # stage 2) pre calculate the matrix, store and load
 #####
@@ -115,3 +121,5 @@ for remain_head in range(args.remove_batch, args.remove_numbers + 1, args.remove
 
 # save information
 recorder.save()
+
+"""
