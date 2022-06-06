@@ -48,6 +48,22 @@ class SubSampler(Sampler):
 
         return len(self.indices)
 
+class CustomSampler(Sampler):
+
+    def __init__(self, sequence):
+
+        self.indices = sequence
+
+    def __iter__(self):
+
+        return iter(self.indices)
+
+    def __len__(self):
+
+        return len(self.indices)
+
+
+
 
 class Dataer:
 
@@ -84,6 +100,8 @@ class Dataer:
             'Cifar10': 10,
             'Mnist': 10,
         }
+
+        self.data_lenth = int(len(self.datasets[0]))
 
     def get_loader(self, head=-1, rear=-1, batch_size=128, isTrain=True, isAdv=False, isClassType=False, isGetOne=False, id=[0, ]):
 
@@ -169,7 +187,15 @@ class Dataer:
         else:
             sub_sampler = SubSampler(adv_data, masked_id=masked_id)
             return DataLoader(adv_data, batch_size=batch_size, sampler=sub_sampler)
-
+    
+    def get_customized_loader(self, sequence, batch_size=128, isTrain=True):
+        
+        custom_sampler = CustomSampler(sequence=sequence)    
+        if isTrain:
+            return DataLoader(self.datasets[0], batch_size=batch_size, sampler=custom_sampler)
+        else:
+            return DataLoader(self.datasets[1], batch_size=batch_size, sampler=custom_sampler)
+            
     def test(self):
 
         data = self.datasets[0]

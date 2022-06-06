@@ -42,9 +42,14 @@ class Neter:
         self.net = copy.deepcopy(basic_neter.net).to(self.device)
         self.default_path = None
         
-    def training(self, epochs=100, lr=0.1, batch_size=128, isAdv=False, verbose=False, head=-1, rear=-1, isSave=False):
+    def training(self, epochs=100, lr=0.1, batch_size=128, isAdv=False, verbose=False, head=-1, rear=-1, isSave=False, isSISA=False, SISA_info=None):
 
-        train_loader = self.dataer.get_loader(batch_size=batch_size, isTrain=True, head=head, rear=rear)
+        if isSISA:
+            if SISA_info == None:
+                raise Exception('The self Loader is None, please recheck !')
+            train_loader = SISA_info['train_loader']
+        else:
+            train_loader = self.dataer.get_loader(batch_size=batch_size, isTrain=True, head=head, rear=rear)
         optimizer = torch.optim.SGD(self.net.parameters(), lr=lr)
 
         if isAdv:
@@ -54,7 +59,7 @@ class Neter:
         start_time = time.time()
         for epoch in range(1, epochs+1):
 
-            self.update(optimizer=optimizer, epoch=epoch)
+            self.update(optimizer=optimizer, epoch=epoch, isClose=isSISA)
 
             lenth = len(train_loader)
             avg_loss = 0.0
@@ -84,8 +89,8 @@ class Neter:
             if epoch % 10 == 0:
                 print('Train acc: {:.2f}%'.format(self.test(isTrainset=True) * 100), end='  ')
                 print('Test acc: {:.2f}%'.format(self.test(isTrainset=False) * 100))
-                print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttck=True)*100), end='  ')
-                print('Adv Test acc: {:.2f}%'.format(self.test(isTrainset=False, isAttck=True)*100))
+                print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True)*100), end='  ')
+                print('Adv Test acc: {:.2f}%'.format(self.test(isTrainset=False, isAttack=True)*100))
         
         end_time = time.time()
 
@@ -95,14 +100,17 @@ class Neter:
                 os.makedirs(path)
             
             atk.save(train_loader, save_path=os.path.join(path, 'sample.pt'), verbose=True)
+        
+        if isSISA:  # need save the slices model
+            self.save_model(path=SISA_info['save_path'])
 
         return (end_time - start_time)
         
-    def test(self, batch_size=128, isTrainset=False, isAttck=False):
+    def test(self, batch_size=128, isTrainset=False, isAttack=False):
         
         loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrainset)
         
-        if isAttck:
+        if isAttack:
             atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
 
         total = 0
@@ -112,7 +120,7 @@ class Neter:
             image = image.to(self.device)
             label = label.to(self.device)
 
-            if isAttck:
+            if isAttack:
                 image = atk(image, label).to(self.device)
 
             output = self.net(image)
@@ -121,8 +129,32 @@ class Neter:
             correct += (pred == label).sum()
         
         return float(correct) / total
+    
+    def get_pred(self, batch_size=128, isTrain=False, isAttack=False):
 
-    def update(self, optimizer, epoch, multipler=0.1):
+        loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrain)
+        
+        if isAttack:
+            atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
+
+        arr = []
+        for (image, label) in loader:
+            image = image.to(self.device)
+            label = label.to(self.device)
+
+            if isAttack:
+                image = atk(image, label).to(self.device)
+
+            output = self.net(image)
+            _, pred = torch.max(output.data, 1)
+            arr.append(pred)
+        
+        return arr
+
+    def update(self, optimizer, epoch, multipler=0.1, isClose=False):
+        
+        if isClose:
+            return
 
         for param_group in optimizer.param_groups:
             param_group['lr'] = self.learning_rate_schedule(epoch=epoch, current_lr=param_group['lr'], multipler=multipler)
