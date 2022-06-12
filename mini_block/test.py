@@ -15,12 +15,10 @@ aa = []
 gg = []
 
 def input_hooker(module, input):
-    print(input[0].data.shape)
     aa.append(CovAHandler(input[0].data, module))
     inps.append(input[0].data.cpu())
 
 def grad_output_hooker(module, grad_input, grad_output):
-    print(grad_output[0].data.shape)
     gg.append(CovGHandler(grad_output[0].data, module, batch_averaged=True))
     out_grads.append(grad_output[0].data.cpu())
 
@@ -65,3 +63,9 @@ for item in aa:
 print('='*100)
 for item in gg:
     print(item.shape)    
+
+
+
+
+
+
