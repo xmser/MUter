@@ -25,6 +25,10 @@ parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
 parser.add_argument('--times', type=int, default=0, help='do repeat experiments')
 parser.add_argument('--gpu_id', default=1, type=int)
+parser.add_argument('--layers', default=28, type=int, help='total number of layers')
+parser.add_argument('--widen-factor', default=10, type=int, help='widen factor')
+parser.add_argument('--droprate', default=0.0, type=float, help='dropout probability')
+
 
 args = parser.parse_args()
 

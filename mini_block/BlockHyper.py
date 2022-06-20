@@ -1,7 +1,7 @@
 import os
 import torch
 from functorch import vmap, jacrev, grad, jacfwd, make_functional
-from model import TestModel
+from parll.MUter.mini_block.model.common_model import TestModel
 from utils import paramters_to_vector, total_param
 from data_utils import Dataer
 from Train import Neter

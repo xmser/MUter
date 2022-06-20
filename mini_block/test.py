@@ -1,4 +1,4 @@
-from model import vgg16
+from parll.MUter.mini_block.model.common_model import vgg16
 import torch
 from tqdm import tqdm
 

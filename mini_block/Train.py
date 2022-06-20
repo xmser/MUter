@@ -1,7 +1,8 @@
 import os
 import torch
 import torch.nn as nn
-from model import *
+from model.common_model import *
+from model.wrn import WideResNet
 from tqdm import tqdm
 import numpy as np
 import copy
@@ -10,31 +11,41 @@ from torchattacks import FGSM, PGD
 
 class Neter:
 
-    def __init__(self, dataer, args, criterion=nn.CrossEntropyLoss(), device='cuda', arch=None):
+    def __init__(self, dataer, args, criterion=nn.CrossEntropyLoss(), device='cuda', arch=None, isTuning=False, pretrain_param=None):
 
         self.criterion = criterion
         self.dataer = dataer
         self.device = device
         self.args = args
         self.net = None
+        self.isTuning = isTuning
+        self.pretrain_param = pretrain_param
         self.default_path = './data'
         self.atk_info = {
             'Cifar10': (4/255, 1/510, 20),
             'Mnist': (2/255, 0.4/255, 20),
         }
-        
-        if dataer.dataset_name == 'Mnist':
-            self.net = TestModel(784, 10).to(self.device)
-        elif dataer.dataset_name == 'Cifar10':
-            if arch == None:
-                self.net = ResNet(ResidualBlock).to(self.device) # default setting
-            elif arch == 'vgg16':
-                self.net = vgg16().to(self.device)
+        if self.isTuning == False:
+            if dataer.dataset_name == 'Mnist':
+                self.net = TestModel(784, 10).to(self.device)
+            elif dataer.dataset_name == 'Cifar10':
+                if arch == None:
+                    self.net = ResNet(ResidualBlock).to(self.device) # default setting
+                elif arch == 'vgg16':
+                    self.net = vgg16().to(self.device)
+                else:
+                    raise Exception('No such arch called {} !'.format(arch))
             else:
-                raise Exception('No such arch called {} !'.format(arch))
-        else:
-            raise Exception('No suchh dataset called {}'.format(dataer.dataset_name))
-    
+                raise Exception('No suchh dataset called {}'.format(dataer.dataset_name))
+        else: # using pre train model
+            if self.pretrain_param == None:
+                raise Exception('Not get the pretrain infom !')
+            if os.path.exists(self.pretrain_param['root_path']) == False:
+                raise Exception('No such path for get the pretrain model !')
+            self.net = WideResNet(args.layers, 1000, args.widen_factor, dropRate=args.droprate).to(self.device)
+            self.net.load_state_dict(torch.load(self.pretrain_param['root_path']))
+            print('Pretrain model successfully load ({})!'.format(self.pretrainModel_path))
+
     def copy(self, basic_neter):
         
         self.criterion = basic_neter.criterion
