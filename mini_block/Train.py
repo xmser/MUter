@@ -131,7 +131,7 @@ class Neter:
                     pbar.update(1)
                     steps += 1
 
-            if epoch % 4 == 0:
+            if epoch % 10 == 0:
                 print('Train acc: {:.2f}%'.format(self.test(isTrainset=True) * 100), end='  ')
                 print('Test acc: {:.2f}%'.format(self.test(isTrainset=False) * 100))
                 print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True)*100), end='  ')
