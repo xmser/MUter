@@ -7,6 +7,7 @@ from Train import Neter
 from Remover import MUterRemover, NewtonRemover, InfluenceRemover, FisherRemover
 from Recorder import Recorder
 from data_utils import Dataer
+from utils import get_layers
 """
 mainly code for machine unlearning, un see the detail of
 the concrete code about how to calculate the matrix and its inverse
@@ -25,10 +26,19 @@ parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
 parser.add_argument('--times', type=int, default=0, help='do repeat experiments')
 parser.add_argument('--gpu_id', default=1, type=int)
-parser.add_argument('--layers', default=28, type=int, help='total number of layers')
-parser.add_argument('--widen-factor', default=10, type=int, help='widen factor')
-parser.add_argument('--droprate', default=0.0, type=float, help='dropout probability')
+parser.add_argument('--ngpu', default=1, type=int)
 
+# for pretrain type
+parser.add_argument('--isPretrain', default=True, type=bool)
+parser.add_argument('--layers', default=28, type=int, help='total number of layers')
+parser.add_argument('--widen_factor', default=10, type=int, help='widen factor')
+parser.add_argument('--droprate', default=0.0, type=float, help='dropout probability')
+parser.add_argument('--pretrain_path', default='data/model/pretrain_model/imagenet_wrn_baseline_epoch_', type=str)
+parser.add_argument('--pretrain_model_number', default=99, type=int)
+parser.add_argument('--tuning_epochs', default=20, type=int)
+parser.add_argument('--tuning_lr', default=0.001, type=float)
+parser.add_argument('--tuning_layer', default='linear', type=str)
+parser.add_argument('--isBias', default=False, type=bool)
 
 args = parser.parse_args()
 
@@ -45,12 +55,24 @@ args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = '{}'.format(args.gpu_id)
 recorder = Recorder(args=args)
 
+pretrain_param = None
+if args.isPretrain:
+    pretrain_param = {
+        'layers': args.layers,
+        'widen_factor': args.widen_factor,
+        'droprate': args.droprate,
+        'root_path': args.pretrain_path + '{}'.format(args.pretrain_model_number) + '.pt',
+        'epochs': args.tuning_epochs,
+        'lr': args.tuning_lr,
+        'new_last_layer': get_layers(args.tuning_layer, isBias=args.isBias),
+    }
+
 #####
 # Stage 1) traninig a roubust model for unlearning (adding SISA)
 #####
 
 dataer = Dataer(dataset_name=args.dataset)
-neter = Neter(dataer=dataer, args=args)
+neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
 time = neter.training(epochs=args.epochs, lr=args.lr, batch_size=args.batchsize, isAdv=True)
 print('time {:.2f}'.format(time))
 """

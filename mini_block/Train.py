@@ -12,6 +12,19 @@ from torchattacks import FGSM, PGD
 class Neter:
 
     def __init__(self, dataer, args, criterion=nn.CrossEntropyLoss(), device='cuda', arch=None, isTuning=False, pretrain_param=None):
+        """
+        manage all the training ways.
+        Args:
+            dataer (_type_): _description_
+            args (_type_): _description_
+            criterion (_type_, optional): _description_. Defaults to nn.CrossEntropyLoss().
+            device (str, optional): _description_. Defaults to 'cuda'.
+            arch (_type_, optional): _description_. Defaults to None.
+            isTuning (bool, optional): _description_. Defaults to False.
+            pretrain_param (_type_, optional): _description_. Defaults to None, if not NOne, it is a dict, basiclly include(
+                epochs, lr, root_path, the fine-tuning layer ways(linear, MLP ), and so on~.
+            )
+        """
 
         self.criterion = criterion
         self.dataer = dataer
@@ -22,9 +35,10 @@ class Neter:
         self.pretrain_param = pretrain_param
         self.default_path = './data'
         self.atk_info = {
-            'Cifar10': (4/255, 1/510, 20),
+            'Cifar10': (8/255, 2/255, 10),
             'Mnist': (2/255, 0.4/255, 20),
         }
+
         if self.isTuning == False:
             if dataer.dataset_name == 'Mnist':
                 self.net = TestModel(784, 10).to(self.device)
@@ -41,19 +55,31 @@ class Neter:
             if self.pretrain_param == None:
                 raise Exception('Not get the pretrain infom !')
             if os.path.exists(self.pretrain_param['root_path']) == False:
-                raise Exception('No such path for get the pretrain model !')
-            self.net = WideResNet(args.layers, 1000, args.widen_factor, dropRate=args.droprate).to(self.device)
-            self.net.load_state_dict(torch.load(self.pretrain_param['root_path']))
-            print('Pretrain model successfully load ({})!'.format(self.pretrainModel_path))
+                raise Exception('No such path for get the pretrain model in {}!'.format(self.pretrain_param['root_path']))
 
-    def copy(self, basic_neter):
+            self.net = WideResNet(self.pretrain_param['layers'], 1000, self.pretrain_param['widen_factor'], dropRate=self.pretrain_param['droprate'])
+            if args.ngpu > 0:
+                self.net = torch.nn.DataParallel(self.net, device_ids=list(range(args.ngpu)))
+            self.net.load_state_dict(torch.load(self.pretrain_param['root_path']))
+            print('Pretrain model successfully load ({})!'.format(self.pretrain_param['root_path']))
+            
+            ## freezing the pre layer
+            for param in self.net.parameters():
+                param.requires_grad = False
+            self.net.module.fc = self.pretrain_param['new_last_layer'] # new_last_layer may be linear or MLP
+
+            self.net = self.net.to(self.device)
+
+    def net_copy(self, basic_neter):
         
-        self.criterion = basic_neter.criterion
-        self.device = basic_neter.device
         self.net = copy.deepcopy(basic_neter.net).to(self.device)
         self.default_path = None
-        
+        self.args = basic_neter.args
+
+
     def training(self, epochs=100, lr=0.1, batch_size=128, isAdv=False, verbose=False, head=-1, rear=-1, isSave=False, isSISA=False, SISA_info=None):
+
+        # for training, learning from the way in 'using Pre-Training can improve model rebustness and uncertainly', using y=2x-1, $x \in [0, 1]$ into $y \in [-1, 1]$, changing the domain
 
         if isSISA:
             if SISA_info == None:
@@ -61,16 +87,24 @@ class Neter:
             train_loader = SISA_info['train_loader']
         else:
             train_loader = self.dataer.get_loader(batch_size=batch_size, isTrain=True, head=head, rear=rear)
-        optimizer = torch.optim.SGD(self.net.parameters(), lr=lr)
 
         if isAdv:
             self.isAdv = True
+            # here the PGD source code have been modified, we use adv_image * 2 - 1 replace the adv_image.
             atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
+
+        optimizer = torch.optim.SGD(self.net.parameters(), lr=lr)
+
+        ## for fine_tuing model
+        if self.isTuning:
+            epochs = self.pretrain_param['epochs']
+            optimizer = torch.optim.SGD(self.net.parameters(), lr=self.pretrain_param['lr'])
+        ## 
 
         start_time = time.time()
         for epoch in range(1, epochs+1):
 
-            self.update(optimizer=optimizer, epoch=epoch, isClose=isSISA)
+            self.update(optimizer=optimizer, epoch=epoch, isClose=(isSISA or self.isTuning))
 
             lenth = len(train_loader)
             avg_loss = 0.0
@@ -84,7 +118,7 @@ class Neter:
                     if isAdv:
                         image = atk(image, label).to(self.device)
 
-                    output = self.net(image)
+                    output = self.net(image * 2 - 1)  # map domain from [0, 1] into [-1, 1]
 
                     loss = self.criterion(output, label)
                     avg_loss += loss.item()
@@ -97,7 +131,7 @@ class Neter:
                     pbar.update(1)
                     steps += 1
 
-            if epoch % 10 == 0:
+            if epoch % 4 == 0:
                 print('Train acc: {:.2f}%'.format(self.test(isTrainset=True) * 100), end='  ')
                 print('Test acc: {:.2f}%'.format(self.test(isTrainset=False) * 100))
                 print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True)*100), end='  ')
@@ -134,7 +168,7 @@ class Neter:
             if isAttack:
                 image = atk(image, label).to(self.device)
 
-            output = self.net(image)
+            output = self.net(image * 2 - 1)
             _, pred = torch.max(output.data, 1)
             total += image.shape[0]
             correct += (pred == label).sum()
@@ -156,7 +190,7 @@ class Neter:
             if isAttack:
                 image = atk(image, label).to(self.device)
 
-            output = self.net(image)
+            output = self.net(image * 2 - 1)
             _, pred = torch.max(output.data, 1)
             arr.append(pred)
         

@@ -9,12 +9,16 @@ where we abstract the remove way as class, the mainly fun here about such:
 6)attribute: neter(manager the network), for neter(need to add function used to update paramter)
 7)method: test model (get from neter)
 """
+from json import load
 from Train import Neter
 import torch
 import os
 from BlockHyper import BasicBlock
 
 class Remover:
+    """
+    the basic scheme is by pretrain arch, args.isTuning == True, in this way, we code the code.
+    """
 
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
         
@@ -27,28 +31,45 @@ class Remover:
         self.grad = None
         self.delta_w = None
         self.path = None
-        self.root_path = 'preMatrix/{}'.format(self.args.dataset)
+        self.root_path = 'data/preMatrix/{}'.format(self.args.dataset)
 
-        self.neter = Neter(dataer=dataer)
-        self.neter.copy(basic_neter)
+
+        self.neter = Neter(dataer=self.dataer, args=self.args)
+        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
 
 
         if os.path.exists(self.root_path) == False:
             os.makedirs(self.root_path)
-                
-        self.path = os.path.join(self.path, '{}.pt'.format(self.remove_method))        
-
-        self.init()  ## for matrix init
+        
+        # construct the save matrix path
+        if self.isDelta:  
+            self.path = os.path.join(self.root_path, '{}_delta.pt'.format(self.remove_method))        
+        else:
+            self.path = os.path.join(self.root_path, '{}'.format(self.remove_method))
 
     def init(self):
         pass
 
     def Load_matrix(self, ):
-        pass
+        
+        if os.path.exists(self.path) == False:
+            raise Exception('No such path for load matrix <{}>'.format(self.path))
+        print('Loading matrix from <{}>'.format(self.path))
+        self.matrix = torch,load(self.path)
+        print('load done !')
 
     def Save_matrix(self, ):
-        pass
-
+        
+        if self.matrix == None:
+            raise Exception('No init the pre save matrix !')
+        if self.isDelta:
+            print('saving the {}_delta matrix to the path <{}> ...'.format(self.remove_method, self.path))
+        else:
+            print('saving the {} matrix to the path <{}> ...'.format(self.remove_method, self.path))
+        
+        torch.save(self.matrix, f=self.path)
+        print('save done !')
+        
     def Calculate_delta_w(self, ):
         pass
 
@@ -56,12 +77,19 @@ class Remover:
         pass
 
 class MUterRemover(Remover):
+    """
+    MUter using the remove function \delta_w = (\partial_ww - \partial_wx.\partial_xx^{-1}.\partial_xw)^{-1}.g
+    method : init() to calculate the sum of total_hessain. For \partial_ww, we use the sum loss for samples to get, for \p_xx, \p_xw(wx),
+    we use the vmap, jaccre from functorch to do this. difficulty: the \p_xx and \p_xw need to be replace by \partial_f_{\theta}f_{\theta} and so on to do this.
+    """
 
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
+        self.init()
     
     def init(self):
+        
         pass
 
     def Unlearning(self, head, rear):
