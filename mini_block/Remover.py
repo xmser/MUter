@@ -12,8 +12,10 @@ where we abstract the remove way as class, the mainly fun here about such:
 from json import load
 from Train import Neter
 import torch
+import torch.nn as nn
 import os
-from BlockHyper import BasicBlock
+from utils import paramters_to_vector, total_param
+from functorch import jacrev, make_functional
 
 class Remover:
     """
@@ -33,6 +35,8 @@ class Remover:
         self.path = None
         self.root_path = 'data/preMatrix/{}'.format(self.args.dataset)
 
+        self.f_theta = [] # input for the last layer
+
 
         self.neter = Neter(dataer=self.dataer, args=self.args)
         self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
@@ -47,8 +51,9 @@ class Remover:
         else:
             self.path = os.path.join(self.root_path, '{}'.format(self.remove_method))
 
-    def init(self):
-        pass
+        if isDelta:
+            self.basic_neter.save_adv_sample(isTrain=True)
+        self.basic_neter.save_inner_output(isTrain=True, isAdv=True)
 
     def Load_matrix(self, ):
         
@@ -70,11 +75,54 @@ class Remover:
         torch.save(self.matrix, f=self.path)
         print('save done !')
         
+
+
+    def get_pure_hessain(self, head=-1, rear=-1):
+        """
+        the pure hessain is \sum \partial_ww for the sample list [head ,rear)
+        detail:
+        1) using the sum_loss
+        2) using the torch.autograd.grad and unit_vec to do this.
+        """
+        def get_unit_vec(vec, index):
+            
+            if index !=0:
+                vec[index - 1] = 0
+            vec[index] = 1
+            return vec
+
+        loader = self.dataer.get_loader( # get the inner output loader for the last layer
+            head=head, 
+            rear=rear, 
+            batch_size=self.dataer.train_data_lenth,  # using the total_size and sum_loss to get the pure_hessain
+            isAdv=self.isDelta,
+            isInner=True
+        )
+
+        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        params_number = total_param(classifier)
+        unit_vec = torch.zeros(params_number).to(self.basic_neter.device)
+        criterion = nn.CrossEntropyLoss(reduction='sum')
+        
+        for inner_out, label in loader:
+            inner_out = inner_out.to(self.basic_neter.device)
+            label = label.to(self.basic_neter.device)
+            output = classifier(inner_out)
+            loss = criterion(output, label)
+
+            grad_w = paramters_to_vector(torch.autograd.grad(loss, classifier.parameters(), create_graph=True, retain_graph=True)[0])
+            grad_ww = [paramters_to_vector(torch.autograd.grad(grad_w, classifier.parameters(), retain_graph=True, grad_outputs=get_unit_vec(unit_vec, index))[0]) for index in range(params_number)]
+        
+        grad_ww = torch.cat(grad_ww)
+
+        return grad_ww
+
     def Calculate_delta_w(self, ):
         pass
 
     def Unlearning(self, ):
         pass
+    
 
 class MUterRemover(Remover):
     """
@@ -86,11 +134,20 @@ class MUterRemover(Remover):
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-        self.init()
-    
-    def init(self):
-        
-        pass
+
+    def get_indirect_hessian(self, head=-1, rear=-1):
+
+        loader = self.dataer.get_loader( # get the inner output loader for the last layer
+            head=head, 
+            rear=rear, 
+            batch_size=1,  # using the total_size and sum_loss to get the pure_hessain
+            isAdv=self.isDelta,
+            isInner=True
+        )
+        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        params_number = total_param(classifier)
+
+        def compute_loss()
 
     def Unlearning(self, head, rear):
         pass
@@ -99,9 +156,7 @@ class NewtonRemover(Remover):
 
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
         super(NewtonRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-    
-    def init(self):
-        pass
+
 
     def Unlearning(self, head, rear):
         pass
@@ -112,8 +167,7 @@ class InfluenceRemover(Remover):
         
         super(InfluenceRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
     
-    def init(self):
-        pass
+
 
     def Unlearning(self, head, rear): 
         pass
@@ -124,8 +178,6 @@ class FisherRemover(Remover):
         
         super(FisherRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
 
-    def init(self):
-        pass
 
     def Unlearning(self, head, rear):
         pass

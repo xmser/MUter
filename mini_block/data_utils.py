@@ -6,6 +6,9 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data.sampler import Sampler
 
+
+# TODO : the classtype loader for inner_output is not done !!!
+
 class SelfSampler(Sampler):
 
     def __init__(self, dataset, head=-1, rear=-1):
@@ -101,54 +104,87 @@ class Dataer:
             'Mnist': 10,
         }
 
-        self.data_lenth = int(len(self.datasets[0]))
+        self.train_data_lenth = int(len(self.datasets[0]))
+        self.test_data_lenth = int(len(self.datasets[1]))
 
-    def get_loader(self, head=-1, rear=-1, batch_size=128, isTrain=True, isAdv=False, isClassType=False, isGetOne=False, id=[0, ]):
+    def get_loader(self, head=-1, rear=-1, batch_size=128, isTrain=True, isAdv=False, isInner=False, isClassType=False, isGetOne=False, id=[0, ]):
 
-        if isClassType == False:
-            if isAdv == False:
-                if head == -1 and rear == -1:    
-                    if isTrain:
-                        return DataLoader(self.datasets[0], batch_size=batch_size)
-                    else:
-                        return DataLoader(self.datasets[1], batch_size=batch_size)
-                else:
-                    if isTrain:
-                        self_sampler = SelfSampler(self.datasets[0], head=head, rear=rear)
-                        return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
-                    else:
-                        self_sampler = SelfSampler(self.datasets[1], head=head, rear=rear)
-                        return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
-            else:
-                adv_data = self.get_adv_samples()
-                if head == -1 and rear == -1:    
-                    return DataLoader(adv_data, batch_size=batch_size)
-                else:
-                    self_sampler = SelfSampler(adv_data, head=head, rear=rear)
-                    return DataLoader(adv_data, batch_size=batch_size, sampler=self_sampler)
+        if isInner:  # TODO need to be update for ClassType... 
+            return self.get_inner_output_loader(batch_size=batch_size, head=head, rear=rear, isTrain=isTrain, isAdv=isAdv)
         else:
-            if isAdv:
-                adv_data = self.get_adv_samples()
-                if isGetOne:
-                    return self.get_loader_ForOneClass(present_id=id, batch_size=batch_size, isTrain=isTrain, adv_data=adv_data, isAdv=isAdv)
+            if isClassType == False:
+                if isAdv == False:
+                    if head == -1 and rear == -1:    
+                        if isTrain:
+                            return DataLoader(self.datasets[0], batch_size=batch_size)
+                        else:
+                            return DataLoader(self.datasets[1], batch_size=batch_size)
+                    else:
+                        if isTrain:
+                            self_sampler = SelfSampler(self.datasets[0], head=head, rear=rear)
+                            return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
+                        else:
+                            self_sampler = SelfSampler(self.datasets[1], head=head, rear=rear)
+                            return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
                 else:
-                    return self.get_loader_MaskOneClass(masked_id=id, batch_size=batch_size, isTrain=isTrain, adv_data=adv_data, isAdv=isAdv)
+                    adv_data = self.get_adv_samples(isTrain=isTrain)
+                    if head == -1 and rear == -1:    
+                        return DataLoader(adv_data, batch_size=batch_size)
+                    else:
+                        self_sampler = SelfSampler(adv_data, head=head, rear=rear)
+                        return DataLoader(adv_data, batch_size=batch_size, sampler=self_sampler)
             else:
-                if isGetOne:
-                    return self.get_loader_ForOneClass(present_id=id, batch_size=batch_size, isTrain=isTrain)
+                if isAdv:
+                    adv_data = self.get_adv_samples()
+                    if isGetOne:
+                        return self.get_loader_ForOneClass(present_id=id, batch_size=batch_size, isTrain=isTrain, adv_data=adv_data, isAdv=isAdv)
+                    else:
+                        return self.get_loader_MaskOneClass(masked_id=id, batch_size=batch_size, isTrain=isTrain, adv_data=adv_data, isAdv=isAdv)
                 else:
-                    return self.get_loader_MaskOneClass(masked_id=id, batch_size=batch_size, isTrain=isTrain)
+                    if isGetOne:
+                        return self.get_loader_ForOneClass(present_id=id, batch_size=batch_size, isTrain=isTrain)
+                    else:
+                        return self.get_loader_MaskOneClass(masked_id=id, batch_size=batch_size, isTrain=isTrain)
     
-    def get_adv_samples(self):
+    def get_inner_output_loader(self, batch_size=128, head=-1, rear=-1, isTrain=True, isAdv=False):
+
+        if isAdv:
+            adv_str = 'adv'
+        else:
+            adv_str = 'clean'
+        
+        if isTrain:
+            sub_path = '{}_inner_output.pt'.format(adv_str)
+        else:
+            sub_path = 'test_{}_inner_output.pt'.format(adv_str)
+        
+        total_path = os.path.join(self.default_path, '{}'.format(self.dataset_name), sub_path)
+        if os.path.exists(total_path) == False:
+            raise Exception('No such inner output sample file path <{}>'.format(total_path))
+        inner_output, label = torch.load(total_path)
+        data = TensorDataset(inner_output, label)
+
+        if head == -1 and rear == -1:
+            return DataLoader(data, batch_size=batch_size, shuffle=False)
+        else:
+            self_sampler = SelfSampler(data, head=head, rear=rear)
+            return DataLoader(data, batch_size=batch_size, sampler=self_sampler)
+
+    def get_adv_samples(self, isTrain=True):
         
         path = os.path.join(self.default_path, self.dataset_name)
         if os.path.exists(path) == False:
             raise Exception('No such adv samples file path, please open the chosen is_save in training !')
         
-        if os.path.exists(os.path.join(path, 'sample.pt')) == False:
+        if isTrain:
+            str = 'sample.pt'
+        else:
+            str = 'test_sample.pt'
+
+        if os.path.exists(os.path.join(path, str)) == False:
             raise Exception('No such adv sample file path, please save adv samples first')
 
-        adv_image, label = torch.load(os.path.join(path, 'sample.pt'))
+        adv_image, label = torch.load(os.path.join(path, str))
         adv_data = TensorDataset(adv_image, label)
 
         return adv_data

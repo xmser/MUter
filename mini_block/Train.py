@@ -34,6 +34,7 @@ class Neter:
         self.isTuning = isTuning
         self.pretrain_param = pretrain_param
         self.default_path = './data'
+        self.inner_output = []
         self.atk_info = {
             'Cifar10': (8/255, 2/255, 10),
             'Mnist': (2/255, 0.4/255, 20),
@@ -218,19 +219,91 @@ class Neter:
                 current_lr *= multipler
         return current_lr
 
-    def save_adv_sample(self, batch_size=128, head=-1, rear=-1, isTrain=True):
+    def save_adv_sample(self, batch_size=128, isTrain=True):
         
         atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
         path = os.path.join(self.default_path, '{}'.format(self.args.dataset))
         if os.path.exists(path) == False:
             os.makedirs(path)
         
-        train_loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrain, head=head, rear=rear)
+        if isTrain:
+            str = 'sample.pt'
+        else:
+            str = 'test_sample.pt'
+        
+        if os.path.exists(os.path.join(path, '{}'.format(str))):
+            print('The adv_sample exists.')
+            return
+        
+        train_loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrain)
         
         if isTrain:
-            atk.save(train_loader, save_path=os.path.join(path, 'sample.pt'), verbose=True)
+            atk.save(train_loader, save_path=os.path.join(path, '{}'.format(str)), verbose=True)
         else:
-            atk.save(train_loader, save_path=os.path.join(path, 'test_sample.pt'), verbose=True)    
+            atk.save(train_loader, save_path=os.path.join(path, '{}'.format(str)), verbose=True)    
+    
+    def hook(self, module, input, output):
+
+        self.inner_output.append(input[0].detach().cpu())
+
+    def save_inner_output(self, batch_size=128, isTrain=True, isAdv=True):
+        """
+        generate the inner output samples and labels, if get the clean sample, not need the adv_samples, else the 
+        first step is load the adv_samples and labels. 
+        Args:
+            batch_size (int, optional): _description_. Defaults to 128.
+            isTrain (bool, optional): _description_. Defaults to True.
+            isAdv (bool, optional): _description_. Defaults to True.
+        """
+
+        self.inner_output.clear()
+        label_list = []
+
+        if isAdv:
+            if isTrain:
+                str = 'sample.pt'
+            else:
+                str = 'test_sample.pt'
+            if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), str)) == False:
+                print('Not save the adv_sample, now saving...')
+                self.save_adv_sample(isTrain=isTrain)
+
+        if isAdv:
+            adv_str = 'adv'
+        else:
+            adv_str = 'clean'
+        if isTrain:
+            if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), '{}_inner_output.pt'.format(adv_str))):
+                print('The inner output sample exits.')
+                return
+        else:
+            if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), 'test_{}_inner_output.pt'.format(adv_str))):
+                print('The inner output sample exits.')
+                return
+
+        loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrain, isAdv=isAdv)
+
+        handle = self.net.module.fc.register_forward_hook(self.hook)
+        
+        for (image, label) in tqdm(loader):
+            image = image.to(self.device)
+            output = self.net(image)            
+            label_list.append(label)
+
+        inner_output_cat = torch.cat(self.inner_output, 0)
+        label_list_cat = torch.cat(label_list, 0)
+
+
+        if isTrain:
+            torch.save((inner_output_cat, label_list_cat), os.path.join(self.default_path, '{}'.format(self.args.dataset), '{}_inner_output.pt'.format(adv_str)))
+        else:
+            torch.save((inner_output_cat, label_list_cat), os.path.join(self.default_path, '{}'.format(self.args.dataset), 'test_{}_inner_output.pt'.format(adv_str)))
+        
+        print('save done !')
+
+        handle.remove()
+        self.inner_output.clear()
+
 
     def save_model(self, path=None):
 
@@ -267,7 +340,6 @@ class Neter:
             head += numbers
 
         print('vector update done !')
-
 
 
     
