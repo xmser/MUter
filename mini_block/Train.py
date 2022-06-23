@@ -321,6 +321,14 @@ class Neter:
         self.net.load_state_dict(torch.load(f=path))
         print('load done !')
     
+    def Reset_last_layer(self, delta_w):
+        
+        head = 0
+        for param in self.net.module.fc.parameters():
+            num_params = np.prod(param.shape)
+            param.data += delta_w[head : head + num_params].to(self.device)
+            head += num_params
+
     def Reset_model_parameters_by_layers(self, delta_w):
         """
         delta_w is a dict, have the same name like the net itself.

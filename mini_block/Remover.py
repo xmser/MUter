@@ -9,13 +9,17 @@ where we abstract the remove way as class, the mainly fun here about such:
 6)attribute: neter(manager the network), for neter(need to add function used to update paramter)
 7)method: test model (get from neter)
 """
-from json import load
+
+from tqdm import tqdm
 from Train import Neter
 import torch
 import torch.nn as nn
 import os
-from utils import paramters_to_vector, total_param
-from functorch import jacrev, make_functional
+from utils import paramters_to_vector, total_param, cg_solve
+from functorch import jacrev, make_functional, vmap
+import math
+from functorch import grad as fast_grad
+
 
 class Remover:
     """
@@ -60,7 +64,7 @@ class Remover:
         if os.path.exists(self.path) == False:
             raise Exception('No such path for load matrix <{}>'.format(self.path))
         print('Loading matrix from <{}>'.format(self.path))
-        self.matrix = torch,load(self.path)
+        self.matrix = torch.load(self.path)
         print('load done !')
 
     def Save_matrix(self, ):
@@ -77,9 +81,9 @@ class Remover:
         
 
 
-    def get_pure_hessain(self, head=-1, rear=-1):
+    def get_pure_hessian(self, head=-1, rear=-1):
         """
-        the pure hessain is \sum \partial_ww for the sample list [head ,rear)
+        the pure hessian is \sum \partial_ww for the sample list [head ,rear)
         detail:
         1) using the sum_loss
         2) using the torch.autograd.grad and unit_vec to do this.
@@ -94,7 +98,7 @@ class Remover:
         loader = self.dataer.get_loader( # get the inner output loader for the last layer
             head=head, 
             rear=rear, 
-            batch_size=self.dataer.train_data_lenth,  # using the total_size and sum_loss to get the pure_hessain
+            batch_size=self.dataer.train_data_lenth,  # using the total_size and sum_loss to get the pure_hessian
             isAdv=self.isDelta,
             isInner=True
         )
@@ -113,12 +117,74 @@ class Remover:
             grad_w = paramters_to_vector(torch.autograd.grad(loss, classifier.parameters(), create_graph=True, retain_graph=True)[0])
             grad_ww = [paramters_to_vector(torch.autograd.grad(grad_w, classifier.parameters(), retain_graph=True, grad_outputs=get_unit_vec(unit_vec, index))[0]) for index in range(params_number)]
         
-        grad_ww = torch.cat(grad_ww)
+        grad_ww = torch.stack(grad_ww, 0)
 
         return grad_ww
 
-    def Calculate_delta_w(self, ):
-        pass
+    def get_fisher_matrix(self, head=-1, rear=-1, batch_size=4096):
+
+        loader = self.dataer.get_loader(
+            head=head,
+            rear=rear,
+            batch_size=batch_size,
+            isAdv=self.isDelta,
+            isInner=True
+        )
+        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        params_number = total_param(classifier)
+        func, classifier_params = make_functional(classifier)
+        criterion = nn.CrossEntropyLoss()
+
+        def compute_loss(params, inner_out, label):
+            image = inner_out.unsqueeze(0)
+            target = label.unsqueeze(0)
+            output = func(image)
+            return criterion(output, target)
+        
+        get_grad = fast_grad(compute_loss, argnums=0)
+        batch_get_grad = vmap(get_grad, in_dims=(None, 0, 0))
+
+        grad_list = []
+        for (inner_out, label) in tqdm(loader):
+            inner_out = inner_out.to(self.basic_neter.device)
+            label = label.to(self.basic_neter.device)
+            grad_list.append(batch_get_grad(classifier_params, inner_out, label))
+        
+        grads = torch.cat(grad_list, 0)
+
+        return grads.t().mm(grads)
+
+    def get_sum_grad(self, head=-1, rear=-1, batch_size=128):
+
+        loader = self.dataer.get_loader(
+            head=head,
+            rear=rear,
+            batch_size=batch_size,
+            isAdv=self.isDelta,
+            isInner=True
+        )
+        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        params_number = total_param(classifier)
+        criterion = nn.CrossEntropyLoss(reduction='sum')
+
+        grad_list = []
+        
+        for (inner_out, label) in tqdm(loader):
+            inner_out = inner_out.to(self.basic_neter.device)
+            label = label.to(self.basic_neter.device)
+            output = classifier(inner_out)
+            loss = criterion(output, label)
+            grad_list.append(paramters_to_vector(torch.autograd.grad(loss, classifier.parameters())[0]))
+        grad_tensor = torch.stack(grad_list, 0)
+        
+        return grad_tensor.sum(0)
+
+    def Update_net_parameters(self, max_iter=10):
+        
+        delta_w = cg_solve(self.matrix, self.grad, cg_iters=max_iter)
+        self.neter.Reset_last_layer(delta_w)
+
+        print('Update done !')
 
     def Unlearning(self, ):
         pass
@@ -127,59 +193,144 @@ class Remover:
 class MUterRemover(Remover):
     """
     MUter using the remove function \delta_w = (\partial_ww - \partial_wx.\partial_xx^{-1}.\partial_xw)^{-1}.g
-    method : init() to calculate the sum of total_hessain. For \partial_ww, we use the sum loss for samples to get, for \p_xx, \p_xw(wx),
+    method : init() to calculate the sum of total_hessian. For \partial_ww, we use the sum loss for samples to get, for \p_xx, \p_xw(wx),
     we use the vmap, jaccre from functorch to do this. difficulty: the \p_xx and \p_xw need to be replace by \partial_f_{\theta}f_{\theta} and so on to do this.
     """
 
-    def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
+    def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
+        self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)
+        self.Save_matrix()
 
-    def get_indirect_hessian(self, head=-1, rear=-1):
+    def get_indirect_hessian(self, head=-1, rear=-1, mini_batch=128):
 
         loader = self.dataer.get_loader( # get the inner output loader for the last layer
             head=head, 
             rear=rear, 
-            batch_size=1,  # using the total_size and sum_loss to get the pure_hessain
+            batch_size=1,  # using the total_size and sum_loss to get the pure_hessian
             isAdv=self.isDelta,
             isInner=True
         )
         classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
         params_number = total_param(classifier)
 
-        def compute_loss()
+        func, classifier_params = make_functional(classifier)
+        criterion = nn.CrossEntropyLoss(reduction='mean')
 
-    def Unlearning(self, head, rear):
-        pass
+        def compute_loss(params, sample, label):
+            output = func(params, sample)
+            return criterion(output, label)
+        
+        def get_single_inverse(matrix):
+            return torch.linalg.pinv(matrix)
+        
+        def get_single_indirect_hessian(partial_xx_inv, partial_xw):
+            return partial_xw.t().mm(partial_xx_inv.mm(partial_xw))
+        
+        partial_xx_list = []
+        partial_xw_list = []
+
+        get_partial_xx = jacrev(jacrev(compute_loss, argnums=1), argnums=1)
+        get_partial_xw = jacrev(jacrev(compute_loss, argnums=1), argnums=0)
+
+        for (inner_out, label) in tqdm(loader):
+            inner_out = inner_out.to(self.basic_neter.device)
+            inner_out.requires_grad = True
+            label = label.to(self.basic_neter.device)
+
+            partial_xx_list.append(get_partial_xx(classifier_params, inner_out, label).detach()) # TODO the output dimesion problem, nned to be reshape
+            partial_xw_list.append(get_partial_xw(classifier_params, inner_out, label).detach())
+
+        partial_xx_tensor = torch.stack(partial_xx_list, 0) # expected tensor shape is [total_batch, x_size, s_size]
+        partial_xw_list_tensor = torch.stack(partial_xw_list, 0) #expected tensor shape is [total_batch, x_size, w_size]
+
+        batch_get_inverse = vmap(get_single_inverse)
+        total_lenth = partial_xx_tensor.shape[0]
+        batch_numbers = math.ceil(total_lenth / mini_batch)
+        partial_xx_inv_list = [batch_get_inverse(partial_xx_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]) for i in range(batch_numbers)]
+        partial_xx_inv_tensor = torch.cat(partial_xx_inv_list, 0)
+        
+        batch_get_indirect_hessian = vmap(get_single_indirect_hessian, in_dims=(0, 0))
+        indirect_hessian_list = [batch_get_indirect_hessian(
+            partial_xx_inv_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)],
+            partial_xw_list_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]
+        ) for i in range(batch_numbers)]
+
+        indirect_hessian_tensor = torch.cat(indirect_hessian_list, 0)
+
+        return indirect_hessian_tensor.sum(0)
+
+    def Unlearning(self, head, rear, mini_batch=128):
+        
+        self.Load_matrix()
+        self.matrix -= (self.get_pure_hessian(head=head, rear=rear) - self.get_indirect_hessian(head=head, rear=rear, mini_batch=mini_batch))
+        if self.grad == None:
+            self.grad = self.get_sum_grad(head=head, rear=rear)
+        else:
+            self.grad += self.get_sum_grad(head=head, rear=rear)
+        self.Save_matrix()
+
+        self.Update_net_parameters()
 
 class NewtonRemover(Remover):
 
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
+        
         super(NewtonRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-
+        self.matrix = self.get_pure_hessian()
+        self.Save_matrix()
 
     def Unlearning(self, head, rear):
-        pass
+
+        self.Load_matrix()
+        self.matrix -= self.get_pure_hessian(head=head, rear=rear)
+        if self.grad == None:
+            self.grad = self.get_sum_grad(head=head, rear=rear)
+        else:
+            self.grad += self.get_sum_grad(head=head, rear=rear)
+        self.Save_matrix()
+
+        self.Update_net_parameters()
 
 class InfluenceRemover(Remover):
     
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
         
         super(InfluenceRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-    
-
+        self.matrix = self.get_pure_hessian()
+        self.Save_matrix()
 
     def Unlearning(self, head, rear): 
-        pass
+
+        self.Load_matrix()
+
+        self.Update_net_parameters()
+
+        self.matrix -= self.get_pure_hessian(head=head, rear=rear)
+        if self.grad == None:
+            self.grad = self.get_sum_grad(head=head, rear=rear)
+        else:
+            self.grad += self.get_sum_grad(head=head, rear=rear)
+        self.Save_matrix()
 
 class FisherRemover(Remover):
 
-    def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
+    def __init__(self, basic_neter, dataer, isDelta, remove_method, args, batch_size=4096):
         
         super(FisherRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-
+        self.matrix = self.get_fisher_matrix(batch_size=batch_size)
+        self.Save_matrix()
 
     def Unlearning(self, head, rear):
-        pass
 
+        self.Load_matrix()
+        self.matrix -= self.get_fisher_matrix(head=head, rear=rear)
+        if self.grad == None:
+            self.grad = self.get_sum_grad(head=head, rear=rear)
+        else:
+            self.grad += self.get_sum_grad(head=head, rear=rear)
+        self.Save_matrix()
+
+        self.Update_net_parameters()
             

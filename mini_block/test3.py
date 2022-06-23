@@ -24,16 +24,18 @@
 
 # handle.remove()
 
-import torch
-import torch.nn as nn
-from functorch import make_functional
+# import torch
+# import torch.nn as nn
+# from functorch import make_functional
 
-fc = nn.Linear(100, 10)
+# fc = nn.Linear(100, 10)
 
-func, param = make_functional(fc)
+# func, param = make_functional(fc)
 
-data = torch.randn((32, 100))
+# data = torch.randn((32, 100))
 
-output = func(param, data)
-print(param[0].shape)
-print(output.shape)
+# output = func(param, data)
+# print(param[0].shape)
+# print(output.shape)
+
+
