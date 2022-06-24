@@ -35,7 +35,7 @@ parser.add_argument('--widen_factor', default=10, type=int, help='widen factor')
 parser.add_argument('--droprate', default=0.0, type=float, help='dropout probability')
 parser.add_argument('--pretrain_path', default='data/model/pretrain_model/imagenet_wrn_baseline_epoch_', type=str)
 parser.add_argument('--pretrain_model_number', default=99, type=int)
-parser.add_argument('--tuning_epochs', default=50, type=int)
+parser.add_argument('--tuning_epochs', default=5, type=int)
 parser.add_argument('--tuning_lr', default=0.001, type=float)
 parser.add_argument('--tuning_layer', default='linear', type=str)
 parser.add_argument('--isBias', default=False, type=bool)
@@ -73,30 +73,41 @@ if args.isPretrain:
 
 dataer = Dataer(dataset_name=args.dataset)
 neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
-time = neter.training(epochs=args.epochs, lr=args.lr, batch_size=args.batchsize, isAdv=True)
-print('time {:.2f}'.format(time))
+
+# after pre save model, we could load model
+neter.load_model()
+
+neter.initialization(isCover=False)
+
+
+### test inner output acc 
+# print('clean train acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=True, isAdv=False) * 100))
+# print('adv train acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=True, isAdv=True) * 100))
+
+# print('clean test acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=False, isAdv=False) * 100))
+# print('adv test acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=False, isAdv=True) * 100))
+
+
+# pre save model
+# time = neter.training(epochs=args.epochs, lr=args.lr, batch_size=args.batchsize, isAdv=True)
+# print('time {:.2f}'.format(time))
+# neter.save_model()
+
+
+
+# ########
+# ### stage 2) pre calculate the matrix, store and load
+# ########
+
+muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
+# newton_delta = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Newton_delta', args=args)
+# newton = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Newton', args=args)
+# influence_delta = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Influence_delta', args=args)
+# influence = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Influence', args=args)
+# fisher_delta = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Fisher', args=args)
+# fisher = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Fisher', args=args)
+
 """
-#####
-# stage 2) pre calculate the matrix, store and load
-#####
-
-muter = MUterRemover(neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
-newton_delta = NewtonRemover(neter=neter, dataer=dataer, isDelta=True, remove_method='Newton_delta', args=args)
-newton = NewtonRemover(neter=neter, dataer=dataer, isDelta=False, remove_method='Newton', args=args)
-influence_delta = InfluenceRemover(neter=neter, dataer=dataer, isDelta=True, remove_method='Influence_delta', args=args)
-influence = InfluenceRemover(neter=neter, dataer=dataer, isDelta=False, remove_method='Influence', args=args)
-fisher_delta = FisherRemover(neter=neter, dataer=dataer, isDelta=True, remove_method='Fisher', args=args)
-fisher = FisherRemover(neter=neter, dataer=dataer, isDelta=False, remove_method='Fisher', args=args)
-
-muter.Load_matrix()
-newton_delta.Load_matrix()
-newton.Load_matrix()
-influence_delta.Load_matrix()
-influence.Load_matrix()
-fisher_delta.Load_matrix()
-fisher.Load_matrix()
-
-
 #####
 # stage 3) the unlearning request coming, do unlearning and measure the metrics.
 # stage 4) post of unlearning 

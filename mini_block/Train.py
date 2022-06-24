@@ -219,7 +219,7 @@ class Neter:
                 current_lr *= multipler
         return current_lr
 
-    def save_adv_sample(self, batch_size=128, isTrain=True):
+    def save_adv_sample(self, batch_size=128, isTrain=True, isCover=False):
         
         atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
         path = os.path.join(self.default_path, '{}'.format(self.args.dataset))
@@ -233,7 +233,10 @@ class Neter:
         
         if os.path.exists(os.path.join(path, '{}'.format(str))):
             print('The adv_sample exists.')
-            return
+            if isCover:
+                print('Now re-cover the file !')
+            else:
+                return
         
         train_loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrain)
         
@@ -246,7 +249,7 @@ class Neter:
 
         self.inner_output.append(input[0].detach().cpu())
 
-    def save_inner_output(self, batch_size=128, isTrain=True, isAdv=True):
+    def save_inner_output(self, batch_size=128, isTrain=True, isAdv=True, isCover=False):
         """
         generate the inner output samples and labels, if get the clean sample, not need the adv_samples, else the 
         first step is load the adv_samples and labels. 
@@ -275,11 +278,17 @@ class Neter:
         if isTrain:
             if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), '{}_inner_output.pt'.format(adv_str))):
                 print('The inner output sample exits.')
-                return
+                if isCover:
+                    print('Now re-cover the file !')
+                else:
+                    return
         else:
             if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), 'test_{}_inner_output.pt'.format(adv_str))):
                 print('The inner output sample exits.')
-                return
+                if isCover:
+                    print('Now re-cover the file !')
+                else:               
+                    return
 
         loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrain, isAdv=isAdv)
 
@@ -287,7 +296,7 @@ class Neter:
         
         for (image, label) in tqdm(loader):
             image = image.to(self.device)
-            output = self.net(image)            
+            output = self.net(image * 2 - 1)            
             label_list.append(label)
 
         inner_output_cat = torch.cat(self.inner_output, 0)
@@ -305,20 +314,20 @@ class Neter:
         self.inner_output.clear()
 
 
-    def save_model(self, path=None):
+    def save_model(self, ):
 
-        if path == None:
-            path = self.default_path
+        if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset))) == False:
+            os.makedirs(os.path.join(self.default_path, '{}'.format(self.args.dataset)))
 
-        torch.save(self.net.state_dict(), f=path)
+        torch.save(self.net.state_dict(), f=os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs)))
         print('save done !')
 
-    def load_model(self, path=None):
+    def load_model(self, ):
+        
+        if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs))) == False:
+            raise Exception('Not save the model, please recheck !')
 
-        if path == None:
-            path = self.default_path
-
-        self.net.load_state_dict(torch.load(f=path))
+        self.net.load_state_dict(torch.load(f=os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs))))
         print('load done !')
     
     def Reset_last_layer(self, delta_w):
@@ -348,7 +357,40 @@ class Neter:
             head += numbers
 
         print('vector update done !')
+    
+    def initialization(self, isCover=False):
+        """
+        generate the adv_train/test_inner_sample and clean _train/test_inner_sample
+        """
 
+        self.save_adv_sample(isTrain=True, isCover=isCover)
+        self.save_adv_sample(isTrain=False, isCover=isCover)
 
+        self.save_inner_output(isTrain=True, isAdv=True, isCover=isCover)
+        self.save_inner_output(isTrain=True, isAdv=False, isCover=isCover)
+        self.save_inner_output(isTrain=False, isAdv=True, isCover=isCover)
+        self.save_inner_output(isTrain=False, isAdv=False, isCover=isCover)
+
+    def test_inner_out_acc(self, isTrain=True, isAdv=True):
+
+        loader = self.dataer.get_loader(
+            isTrain=isTrain,
+            isAdv=isAdv,
+            isInner=True,
+        )
+
+        classifier = self.net.module.fc
+        total = 0
+        correct = 0
+
+        for (inner_out, label) in loader:
+            inner_out = inner_out.to(self.device)
+            label = label.to(self.device)
+            output = classifier(inner_out)
+            _, pred = torch.max(output.data, 1)
+            total += inner_out.shape[0]
+            correct += (pred == label).sum()
+        
+        return float(correct) / total
     
     

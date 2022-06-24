@@ -200,20 +200,28 @@ class MUterRemover(Remover):
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-        self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)
-        self.Save_matrix()
+        self.get_indirect_hessian(mini_batch=mini_batch)
+        # self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)
+        # self.Save_matrix()
 
-    def get_indirect_hessian(self, head=-1, rear=-1, mini_batch=128):
+    def get_indirect_hessian(self, head=-1, rear=-1, mini_batch=128, block_wise_size=100):
+        """
+        Args:
+            head (int, optional): _description_. Defaults to -1.
+            rear (int, optional): _description_. Defaults to -1.
+            mini_batch (int, optional): _description_. Defaults to 128.
+            block_wise_size (int, optional): _description_. Defaults to 100., using the block_wise strategy to generate indirect hessian, 
+            which could economy cuda_memory.
+        """
 
-        loader = self.dataer.get_loader( # get the inner output loader for the last layer
-            head=head, 
-            rear=rear, 
-            batch_size=1,  # using the total_size and sum_loss to get the pure_hessian
-            isAdv=self.isDelta,
-            isInner=True
-        )
+        # loader = self.dataer.get_loader( # get the inner output loader for the last layer
+        #     head=head, 
+        #     rear=rear, 
+        #     batch_size=1,  # using the total_size and sum_loss to get the pure_hessian
+        #     isAdv=self.isDelta,
+        #     isInner=True
+        # )
         classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
-        params_number = total_param(classifier)
 
         func, classifier_params = make_functional(classifier)
         criterion = nn.CrossEntropyLoss(reduction='mean')
@@ -227,39 +235,69 @@ class MUterRemover(Remover):
         
         def get_single_indirect_hessian(partial_xx_inv, partial_xw):
             return partial_xw.t().mm(partial_xx_inv.mm(partial_xw))
-        
-        partial_xx_list = []
-        partial_xw_list = []
 
-        get_partial_xx = jacrev(jacrev(compute_loss, argnums=1), argnums=1)
-        get_partial_xw = jacrev(jacrev(compute_loss, argnums=1), argnums=0)
+        indirect_hessian = None
+        data_size = self.dataer.train_data_lenth # the loader iter scale is 1, the len == the size of data
+        steps = math.ceil(data_size / block_wise_size)
 
-        for (inner_out, label) in tqdm(loader):
-            inner_out = inner_out.to(self.basic_neter.device)
-            inner_out.requires_grad = True
-            label = label.to(self.basic_neter.device)
+        for i in tqdm(range(steps)):
 
-            partial_xx_list.append(get_partial_xx(classifier_params, inner_out, label).detach()) # TODO the output dimesion problem, nned to be reshape
-            partial_xw_list.append(get_partial_xw(classifier_params, inner_out, label).detach())
+            get_partial_xx = jacrev(jacrev(compute_loss, argnums=1), argnums=1)
+            get_partial_xw = jacrev(jacrev(compute_loss, argnums=1), argnums=0)
 
-        partial_xx_tensor = torch.stack(partial_xx_list, 0) # expected tensor shape is [total_batch, x_size, s_size]
-        partial_xw_list_tensor = torch.stack(partial_xw_list, 0) #expected tensor shape is [total_batch, x_size, w_size]
+            head = i * block_wise_size
+            rear = min((i + 1) * block_wise_size, data_size)
+            loader = self.dataer.get_loader( # get the inner output loader for the last layer
+                head=head, 
+                rear=rear, 
+                batch_size=1,  # using the total_size and sum_loss to get the pure_hessian
+                isAdv=self.isDelta,
+                isInner=True
+            )
+            partial_xx_list = []
+            partial_xw_list = []
 
-        batch_get_inverse = vmap(get_single_inverse)
-        total_lenth = partial_xx_tensor.shape[0]
-        batch_numbers = math.ceil(total_lenth / mini_batch)
-        partial_xx_inv_list = [batch_get_inverse(partial_xx_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]) for i in range(batch_numbers)]
-        partial_xx_inv_tensor = torch.cat(partial_xx_inv_list, 0)
-        
-        batch_get_indirect_hessian = vmap(get_single_indirect_hessian, in_dims=(0, 0))
-        indirect_hessian_list = [batch_get_indirect_hessian(
-            partial_xx_inv_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)],
-            partial_xw_list_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]
-        ) for i in range(batch_numbers)]
+            for (inner_out, label) in loader:
+                inner_out = inner_out.to(self.basic_neter.device)
+                inner_out.requires_grad = True
+                label = label.to(self.basic_neter.device)
 
-        indirect_hessian_tensor = torch.cat(indirect_hessian_list, 0)
+                partial_xx_list.append(get_partial_xx(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1)) # TODO the output dimesion problem, nned to be reshape
+                partial_xw_list.append(get_partial_xw(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1))
+            
+            partial_xx_tensor = torch.stack(partial_xx_list, 0) # expected tensor shape is [total_batch, x_size, s_size]
+            partial_xw_tensor = torch.stack(partial_xw_list, 0) #expected tensor shape is [total_batch, x_size, w_size]
 
-        return indirect_hessian_tensor.sum(0)
+            del partial_xx_list
+            del partial_xw_list
+
+            batch_get_inverse = vmap(get_single_inverse)
+            total_lenth = partial_xx_tensor.shape[0]
+            batch_numbers = math.ceil(total_lenth / mini_batch)
+            partial_xx_inv_list = [batch_get_inverse(partial_xx_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]) for i in range(batch_numbers)]
+            partial_xx_inv_tensor = torch.cat(partial_xx_inv_list, 0)
+            
+            del partial_xx_inv_list
+            del partial_xx_tensor
+            
+            batch_get_indirect_hessian = vmap(get_single_indirect_hessian, in_dims=(0, 0))
+            indirect_hessian_list = [batch_get_indirect_hessian(
+                partial_xx_inv_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)],
+                partial_xw_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]
+            ).sum(0) for i in range(batch_numbers)]
+
+            indirect_hessian_tensor = torch.stack(indirect_hessian_list, 0)
+            del indirect_hessian_list
+            del partial_xx_inv_tensor
+            del partial_xw_tensor
+
+            if indirect_hessian == None:
+                indirect_hessian = indirect_hessian_tensor.sum(0).detach()
+            else:
+                indirect_hessian += indirect_hessian_tensor.sum(0).detach()
+            torch.cuda.empty_cache()
+
+        return indirect_hessian
 
     def Unlearning(self, head, rear, mini_batch=128):
         
