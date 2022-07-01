@@ -1,3 +1,4 @@
+from ntpath import join
 import os
 import torch
 import torch.nn as nn
@@ -78,7 +79,7 @@ class Neter:
         self.args = basic_neter.args
 
 
-    def training(self, epochs=100, lr=0.1, batch_size=128, isAdv=False, verbose=False, head=-1, rear=-1, isSave=False, isSISA=False, SISA_info=None):
+    def training(self, epochs=100, lr=0.001, batch_size=128, isAdv=False, verbose=False, head=-1, rear=-1, isSave=False, isSISA=False, SISA_info=None, isFinaltest=True):
 
         # for training, learning from the way in 'using Pre-Training can improve model rebustness and uncertainly', using y=2x-1, $x \in [0, 1]$ into $y \in [-1, 1]$, changing the domain
 
@@ -101,7 +102,7 @@ class Neter:
             epochs = self.pretrain_param['epochs']
             optimizer = torch.optim.SGD(self.net.parameters(), lr=self.pretrain_param['lr'])
         ## 
-
+        self.net.train()
         start_time = time.time()
         for epoch in range(1, epochs+1):
 
@@ -132,13 +133,19 @@ class Neter:
                     pbar.update(1)
                     steps += 1
 
-            if epoch % 10 == 0:
+            if epoch % 10 == 0 and isFinaltest == False:
                 print('Train acc: {:.2f}%'.format(self.test(isTrainset=True) * 100), end='  ')
                 print('Test acc: {:.2f}%'.format(self.test(isTrainset=False) * 100))
                 print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True)*100), end='  ')
                 print('Adv Test acc: {:.2f}%'.format(self.test(isTrainset=False, isAttack=True)*100))
         
         end_time = time.time()
+
+        if isFinaltest:
+            print('Train acc: {:.2f}%'.format(self.test(isTrainset=True, self_loader=train_loader) * 100), end='  ')
+            print('Test acc: {:.2f}%'.format(self.test(isTrainset=False) * 100))
+            print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True, self_loader=train_loader)*100), end='  ')
+            print('Adv Test acc: {:.2f}%'.format(self.test(isTrainset=False, isAttack=True)*100))
 
         if isAdv and isSave:
             path = os.path.join(self.default_path, '{}'.format(self.args.dataset))
@@ -148,20 +155,22 @@ class Neter:
             atk.save(train_loader, save_path=os.path.join(path, 'sample.pt'), verbose=True)
         
         if isSISA:  # need save the slices model
-            self.save_model(path=SISA_info['save_path'])
+            self.save_sisa_model(path=SISA_info['save_path'])
 
         return (end_time - start_time)
         
-    def test(self, batch_size=128, isTrainset=False, isAttack=False):
+    def test(self, batch_size=128, isTrainset=False, isAttack=False, self_loader=None):
         
         loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrainset)
-        
+        if self_loader != None:
+            loader = self_loader
+
         if isAttack:
             atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
 
         total = 0
         correct = 0
-
+        self.net.eval()
         for (image, label) in loader:
             image = image.to(self.device)
             label = label.to(self.device)
@@ -174,6 +183,7 @@ class Neter:
             total += image.shape[0]
             correct += (pred == label).sum()
         
+        self.net.train()
         return float(correct) / total
     
     def get_pred(self, batch_size=128, isTrain=False, isAttack=False):
@@ -184,6 +194,7 @@ class Neter:
             atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
 
         arr = []
+        self.net.eval()
         for (image, label) in loader:
             image = image.to(self.device)
             label = label.to(self.device)
@@ -194,7 +205,7 @@ class Neter:
             output = self.net(image * 2 - 1)
             _, pred = torch.max(output.data, 1)
             arr.append(pred)
-        
+        self.net.train()
         return arr
 
     def update(self, optimizer, epoch, multipler=0.1, isClose=False):
@@ -294,10 +305,23 @@ class Neter:
 
         handle = self.net.module.fc.register_forward_hook(self.hook)
         
+        correct = 0
+        total = 0
+
+        self.net.eval()
+
         for (image, label) in tqdm(loader):
             image = image.to(self.device)
+            label = label.to(self.device)
             output = self.net(image * 2 - 1)            
             label_list.append(label)
+            _, pred = torch.max(output.data, 1)
+            total += image.shape[0]
+            correct += (pred == label).sum()
+        
+        self.net.train()
+
+        print('The acc is {:.2f}%'.format(float(correct) / total * 100))
 
         inner_output_cat = torch.cat(self.inner_output, 0)
         label_list_cat = torch.cat(label_list, 0)
@@ -313,6 +337,18 @@ class Neter:
         handle.remove()
         self.inner_output.clear()
 
+    def save_sisa_model(self, path):
+
+        torch.save(self.net.state_dict(), f=path)
+        print('save in <{}>'.format(path))
+
+    def load_sisa_model(self, path):
+
+        if os.path.exists(path) == False:
+            print('Not find the corespnds file path <{}>, please recheck !'.format(path))
+        
+        self.net.load_state_dict(torch.load(f=path))
+        print('load done !')
 
     def save_model(self, ):
 
@@ -335,7 +371,7 @@ class Neter:
         head = 0
         for param in self.net.module.fc.parameters():
             num_params = np.prod(param.shape)
-            param.data += delta_w[head : head + num_params].to(self.device)
+            param.data += delta_w[head : head + num_params].view_as(param.data).to(self.device)
             head += num_params
 
     def Reset_model_parameters_by_layers(self, delta_w):
@@ -383,6 +419,8 @@ class Neter:
         total = 0
         correct = 0
 
+        self.net.eval()
+
         for (inner_out, label) in loader:
             inner_out = inner_out.to(self.device)
             label = label.to(self.device)
@@ -390,6 +428,8 @@ class Neter:
             _, pred = torch.max(output.data, 1)
             total += inner_out.shape[0]
             correct += (pred == label).sum()
+        
+        self.net.train()
         
         return float(correct) / total
     

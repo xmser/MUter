@@ -1,5 +1,3 @@
-from gettext import find
-from msilib import sequence
 import torch
 from Train import Neter
 from data_utils import Dataer
@@ -7,6 +5,7 @@ import math
 import numpy as np
 import os
 from functorch import vmap
+from utils import get_layers
 
 
 # TODO After the remove ,the size become zero, need to be pay attention~
@@ -112,23 +111,56 @@ class SISA:
 
         self.dataer = dataer
         self.args = args
-        self.manager = Manager(shards_nums=shards_num, slices_nums=slices_num, total_lenth=self.dataer.data_lenth)
+        self.manager = Manager(shards_nums=shards_num, slices_nums=slices_num, total_lenth=self.dataer.train_data_lenth)
         self.model_list = []
 
         self.basic_path = 'data/SISA/{}'.format(self.dataer.dataset_name)
         if os.path.exists(self.basic_path) == False:
             os.makedirs(self.basic_path)
+
+    def Reload(self, ):
+
+        self.model_list.clear()
+
+        for index in range(self.manager.shards_nums):
+            pretrain_param = None
+            if self.args.isPretrain:
+                pretrain_param = {
+                    'layers': self.args.layers,
+                    'widen_factor': self.args.widen_factor,
+                    'droprate': self.args.droprate,
+                    'root_path': self.args.pretrain_path + '{}'.format(self.args.pretrain_model_number) + '.pt',
+                    'new_last_layer': get_layers(self.args.tuning_layer, isBias=self.args.isBias),
+                }
+
+            sub_model = Neter(dataer=self.dataer, args=self.args, isTuning=self.args.isPretrain, pretrain_param=pretrain_param)
+            sub_model.load_sisa_model(os.path.join(self.basic_path, 'shard{}_slice{}.pt'.format(index, self.manager.slices_nums - 1)))
+            
+            self.model_list.append(sub_model)
         
-    
+        print('sisa submodel load done !')
+
     def sisa_train(self, batch_size=128, isTrain=True, isAdv=False, verbose=False):
         
         """
         train sub_model by shards.
         """
-        sub_epochs = math.ceil((self.args.epochs * 2) / (self.manager.shards_nums + 1))
+        sub_epochs = math.ceil((self.args.tuning_epochs * 2) / (self.manager.shards_nums + 1))
         for index in range(self.manager.shards_nums):  #traverse the shards
+            
+            pretrain_param = None
+            if self.args.isPretrain:
+                pretrain_param = {
+                    'layers': self.args.layers,
+                    'widen_factor': self.args.widen_factor,
+                    'droprate': self.args.droprate,
+                    'root_path': self.args.pretrain_path + '{}'.format(self.args.pretrain_model_number) + '.pt',
+                    'epochs': sub_epochs,
+                    'lr': self.args.tuning_lr,
+                    'new_last_layer': get_layers(self.args.tuning_layer, isBias=self.args.isBias),
+                }
 
-            sub_model = Neter(dataer=self.dataer, args=self.args)
+            sub_model = Neter(dataer=self.dataer, args=self.args, isTuning=self.args.isPretrain, pretrain_param=pretrain_param)
 
             for dex in range(self.manager.slices_nums):
                 sequence = self.manager.get_incremental_list(shards_index=index, times=dex)
@@ -137,7 +169,14 @@ class SISA:
                     'train_loader': train_loader,
                     'save_path': os.path.join(self.basic_path, 'shard{}_slice{}.pt'.format(index, dex)),
                 }    
-                sub_model.training(epochs=sub_epochs, lr=self.args.lr, batch_size=batch_size, isAdv=isAdv, verbose=verbose, isSISA=True, SISA_info=train_info)
+                sub_model.training(
+                    lr=self.args.tuning_lr, 
+                    batch_size=batch_size, 
+                    isAdv=isAdv, 
+                    verbose=verbose, 
+                    isSISA=True, 
+                    SISA_info=train_info,
+                )
                 
                 if dex == self.manager.shards_nums - 1:
                     self.model_list.append(sub_model)
@@ -148,14 +187,28 @@ class SISA:
         """
         retrain a shard or sub shards
         """
-        sub_epochs = math.ceil((self.args.epochs * 2) / (self.manager.shards_nums + 1))
+        sub_epochs = math.ceil((self.args.tuning_epochs * 2) / (self.manager.shards_nums + 1))
         retrain_info = self.manager.remove_indexs(sequence=sequence)
 
-        for (shard_index, slice_head) in retrain_info:
+        print('Retrain following shards and slice ...')
+        print(retrain_info)
 
-            sub_model = Neter(dataer=self.dataer, args=self.args) # load the savbe slice model
+        for (shard_index, slice_head) in retrain_info:
+            pretrain_param = None
+            if self.args.isPretrain:
+                pretrain_param = {
+                    'layers': self.args.layers,
+                    'widen_factor': self.args.widen_factor,
+                    'droprate': self.args.droprate,
+                    'root_path': self.args.pretrain_path + '{}'.format(self.args.pretrain_model_number) + '.pt',
+                    'epochs': sub_epochs,
+                    'lr': self.args.tuning_lr,
+                    'new_last_layer': get_layers(self.args.tuning_layer, isBias=self.args.isBias),
+                }
+
+            sub_model = Neter(dataer=self.dataer, args=self.args, isTuning=self.args.isPretrain, pretrain_param=pretrain_param) # load the savbe slice model
             if slice_head != 0:
-                sub_model.load_model(os.path.join(self.basic_path, 'shard{}_slice{}.pt'.format(shard_index, slice_head - 1)))
+                sub_model.load_sisa_model(os.path.join(self.basic_path, 'shard{}_slice{}.pt'.format(shard_index, slice_head - 1)))
             
             for dex in range(slice_head, self.manager.slices_nums):
 
@@ -165,7 +218,14 @@ class SISA:
                     'train_loader': train_loader,
                     'save_path': os.path.join(self.basic_path, 'shard{}_slice{}.pt'.format(shard_index, dex))
                 }
-                sub_model.training(epochs=sub_epochs, lr=self.args.lr, batch_size=batch_size, isAdv=isAdv, verbose=verbose, isSISA=True, SISA_info=train_info)
+                sub_model.training(
+                    lr=self.args.tuning_lr, 
+                    batch_size=batch_size, 
+                    isAdv=isAdv, 
+                    verbose=verbose, 
+                    isSISA=True, 
+                    SISA_info=train_info
+                )
                 
                 if dex == self.manager.slices_nums - 1:
                     self.model_list[shard_index] = sub_model
@@ -213,13 +273,11 @@ class SISA:
         return get_most(mat)
 
 
-
 if __name__ == "__main__":
 
-    dicter = {}
+    manager = Manager(5, 5, 10000)
+    info = manager.remove_indexs([2003, 2005, 3201, 3999])
+    arr = manager.get_incremental_list(1, 4)
+    print(len(arr))
 
-    for i in range(10):
-        dicter[i] = {'l': 'hello'}
-
-    for i in range(10):
-        print(dicter[i]['l'])
+    print(info)

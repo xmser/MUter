@@ -19,7 +19,7 @@ from utils import paramters_to_vector, total_param, cg_solve
 from functorch import jacrev, make_functional, vmap
 import math
 from functorch import grad as fast_grad
-
+import time
 
 class Remover:
     """
@@ -53,7 +53,7 @@ class Remover:
         if self.isDelta:  
             self.path = os.path.join(self.root_path, '{}_delta.pt'.format(self.remove_method))        
         else:
-            self.path = os.path.join(self.root_path, '{}'.format(self.remove_method))
+            self.path = os.path.join(self.root_path, '{}.pt'.format(self.remove_method))
 
         if isDelta:
             self.basic_neter.save_adv_sample(isTrain=True)
@@ -108,6 +108,7 @@ class Remover:
         unit_vec = torch.zeros(params_number).to(self.basic_neter.device)
         criterion = nn.CrossEntropyLoss(reduction='sum')
         
+        hessian_ww = None
         for inner_out, label in loader:
             inner_out = inner_out.to(self.basic_neter.device)
             label = label.to(self.basic_neter.device)
@@ -115,11 +116,13 @@ class Remover:
             loss = criterion(output, label)
 
             grad_w = paramters_to_vector(torch.autograd.grad(loss, classifier.parameters(), create_graph=True, retain_graph=True)[0])
-            grad_ww = [paramters_to_vector(torch.autograd.grad(grad_w, classifier.parameters(), retain_graph=True, grad_outputs=get_unit_vec(unit_vec, index))[0]) for index in range(params_number)]
-        
-        grad_ww = torch.stack(grad_ww, 0)
+            grad_ww = [paramters_to_vector(torch.autograd.grad(grad_w, classifier.parameters(), retain_graph=True, grad_outputs=get_unit_vec(unit_vec, index))[0]) for index in tqdm(range(params_number))]
 
-        return grad_ww
+            hessian_ww = grad_ww
+
+        hessian_ww = torch.stack(hessian_ww, 0)
+
+        return hessian_ww
 
     def get_fisher_matrix(self, head=-1, rear=-1, batch_size=4096):
 
@@ -138,7 +141,7 @@ class Remover:
         def compute_loss(params, inner_out, label):
             image = inner_out.unsqueeze(0)
             target = label.unsqueeze(0)
-            output = func(image)
+            output = func(params, image)
             return criterion(output, target)
         
         get_grad = fast_grad(compute_loss, argnums=0)
@@ -148,7 +151,7 @@ class Remover:
         for (inner_out, label) in tqdm(loader):
             inner_out = inner_out.to(self.basic_neter.device)
             label = label.to(self.basic_neter.device)
-            grad_list.append(batch_get_grad(classifier_params, inner_out, label))
+            grad_list.append(batch_get_grad(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[0], -1))
         
         grads = torch.cat(grad_list, 0)
 
@@ -200,9 +203,8 @@ class MUterRemover(Remover):
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-        self.get_indirect_hessian(mini_batch=mini_batch)
-        # self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)
-        # self.Save_matrix()
+        self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)
+        self.Save_matrix()
 
     def get_indirect_hessian(self, head=-1, rear=-1, mini_batch=128, block_wise_size=100):
         """
@@ -237,7 +239,13 @@ class MUterRemover(Remover):
             return partial_xw.t().mm(partial_xx_inv.mm(partial_xw))
 
         indirect_hessian = None
-        data_size = self.dataer.train_data_lenth # the loader iter scale is 1, the len == the size of data
+
+        if head == -1:
+            head = 0
+        if rear == -1:
+            rear = self.dataer.train_data_lenth
+        data_size = rear - head
+
         steps = math.ceil(data_size / block_wise_size)
 
         for i in tqdm(range(steps)):
@@ -245,11 +253,11 @@ class MUterRemover(Remover):
             get_partial_xx = jacrev(jacrev(compute_loss, argnums=1), argnums=1)
             get_partial_xw = jacrev(jacrev(compute_loss, argnums=1), argnums=0)
 
-            head = i * block_wise_size
-            rear = min((i + 1) * block_wise_size, data_size)
+            start = head + i * block_wise_size
+            end = min(head + (i + 1) * block_wise_size, rear)
             loader = self.dataer.get_loader( # get the inner output loader for the last layer
-                head=head, 
-                rear=rear, 
+                head=start, 
+                rear=end, 
                 batch_size=1,  # using the total_size and sum_loss to get the pure_hessian
                 isAdv=self.isDelta,
                 isInner=True
@@ -301,6 +309,8 @@ class MUterRemover(Remover):
 
     def Unlearning(self, head, rear, mini_batch=128):
         
+        start = time.time()
+
         self.Load_matrix()
         self.matrix -= (self.get_pure_hessian(head=head, rear=rear) - self.get_indirect_hessian(head=head, rear=rear, mini_batch=mini_batch))
         if self.grad == None:
@@ -310,6 +320,10 @@ class MUterRemover(Remover):
         self.Save_matrix()
 
         self.Update_net_parameters()
+
+        end = time.time()
+
+        return (end - start)
 
 class NewtonRemover(Remover):
 
@@ -342,14 +356,14 @@ class InfluenceRemover(Remover):
     def Unlearning(self, head, rear): 
 
         self.Load_matrix()
-
-        self.Update_net_parameters()
-
-        self.matrix -= self.get_pure_hessian(head=head, rear=rear)
         if self.grad == None:
             self.grad = self.get_sum_grad(head=head, rear=rear)
         else:
             self.grad += self.get_sum_grad(head=head, rear=rear)
+        self.Update_net_parameters()
+
+        self.matrix -= self.get_pure_hessian(head=head, rear=rear)
+
         self.Save_matrix()
 
 class FisherRemover(Remover):
