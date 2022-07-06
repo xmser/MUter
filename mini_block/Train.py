@@ -171,7 +171,7 @@ class Neter:
         total = 0
         correct = 0
         self.net.eval()
-        for (image, label) in loader:
+        for (image, label) in tqdm(loader):
             image = image.to(self.device)
             label = label.to(self.device)
 

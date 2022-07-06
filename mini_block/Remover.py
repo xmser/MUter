@@ -103,7 +103,7 @@ class Remover:
             isInner=True
         )
 
-        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        classifier = self.basic_neter.net.module.fc.to(self.basic_neter.device) #get the last layer
         params_number = total_param(classifier)
         unit_vec = torch.zeros(params_number).to(self.basic_neter.device)
         criterion = nn.CrossEntropyLoss(reduction='sum')
@@ -133,7 +133,7 @@ class Remover:
             isAdv=self.isDelta,
             isInner=True
         )
-        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        classifier = self.basic_neter.net.module.fc.to(self.basic_neter.device) #get the last layer
         func, classifier_params = make_functional(classifier)
         criterion = nn.CrossEntropyLoss()
 
@@ -165,7 +165,7 @@ class Remover:
             isAdv=self.isDelta,
             isInner=True
         )
-        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        classifier = self.basic_neter.net.module.fc.to(self.basic_neter.device) #get the last layer
         criterion = nn.CrossEntropyLoss(reduction='sum')
 
         grad_list = []
@@ -183,8 +183,8 @@ class Remover:
 
     def Update_net_parameters(self, ):
         
-        # delta_w = cg_solve(self.matrix, self.grad)
-        delta_w = torch.mv(torch.linalg.pinv(self.matrix), self.grad)
+        delta_w = cg_solve(self.matrix, self.grad)
+        # delta_w = torch.mv(torch.linalg.pinv(self.matrix), self.grad)
         self.neter.Reset_last_layer(delta_w)
 
         print('Update done !')
@@ -223,7 +223,7 @@ class MUterRemover(Remover):
         #     isAdv=self.isDelta,
         #     isInner=True
         # )
-        classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+        classifier = self.basic_neter.net.module.fc.to(self.basic_neter.device) #get the last layer
 
         func, classifier_params = make_functional(classifier)
         criterion = nn.CrossEntropyLoss(reduction='mean')
