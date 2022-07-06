@@ -44,7 +44,7 @@ def get_layers(str, input_features=640, output_features=10, isBias=False):
         raise Exception('No such method called {}, please recheck !'.format(str))
 
 
-def cg_solve(f_Ax, b, cg_iters=10, callback=None, verbose=False, residual_tol=1e-5, x_init=None):
+def cg_solve(f_Ax, b, cg_iters=1000, callback=None, verbose=False, residual_tol=1e-5, x_init=None):
     """
     Goal: Solve Ax=b equivalent to minimizing f(x) = 1/2 x^T A x - x^T b
     Assumption: A is PSD, no damping term is used here (must be damped externally in f_Ax)

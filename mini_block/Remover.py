@@ -28,7 +28,7 @@ class Remover:
 
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args):
         
-        self.basic_neter = basic_neter ## the origin neter
+        self.basic_neter = basic_neter ## the origin neter, for reference and copy
         self.dataer = dataer
         self.isDelta = isDelta
         self.args = args
@@ -88,7 +88,7 @@ class Remover:
         1) using the sum_loss
         2) using the torch.autograd.grad and unit_vec to do this.
         """
-        def get_unit_vec(vec, index):
+        def get_unit_vec(vec, index):  # using the unit vector for HV operation.
             
             if index !=0:
                 vec[index - 1] = 0
@@ -120,7 +120,7 @@ class Remover:
 
             hessian_ww = grad_ww
 
-        hessian_ww = torch.stack(hessian_ww, 0)
+        hessian_ww = torch.stack(hessian_ww, 0).detach()
 
         return hessian_ww
 
@@ -134,7 +134,6 @@ class Remover:
             isInner=True
         )
         classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
-        params_number = total_param(classifier)
         func, classifier_params = make_functional(classifier)
         criterion = nn.CrossEntropyLoss()
 
@@ -167,7 +166,6 @@ class Remover:
             isInner=True
         )
         classifier = self.neter.net.module.fc.to(self.basic_neter.device) #get the last layer
-        params_number = total_param(classifier)
         criterion = nn.CrossEntropyLoss(reduction='sum')
 
         grad_list = []
@@ -178,13 +176,15 @@ class Remover:
             output = classifier(inner_out)
             loss = criterion(output, label)
             grad_list.append(paramters_to_vector(torch.autograd.grad(loss, classifier.parameters())[0]))
+
         grad_tensor = torch.stack(grad_list, 0)
         
         return grad_tensor.sum(0)
 
-    def Update_net_parameters(self, max_iter=10):
+    def Update_net_parameters(self, ):
         
-        delta_w = cg_solve(self.matrix, self.grad, cg_iters=max_iter)
+        # delta_w = cg_solve(self.matrix, self.grad)
+        delta_w = torch.mv(torch.linalg.pinv(self.matrix), self.grad)
         self.neter.Reset_last_layer(delta_w)
 
         print('Update done !')
@@ -203,10 +203,10 @@ class MUterRemover(Remover):
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-        self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)
+        self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)   ## total hessian
         self.Save_matrix()
 
-    def get_indirect_hessian(self, head=-1, rear=-1, mini_batch=128, block_wise_size=100):
+    def get_indirect_hessian(self, head=-1, rear=-1, mini_batch=128, block_wise_size=20):
         """
         Args:
             head (int, optional): _description_. Defaults to -1.
@@ -233,7 +233,7 @@ class MUterRemover(Remover):
             return criterion(output, label)
         
         def get_single_inverse(matrix):
-            return torch.linalg.pinv(matrix)
+            return torch.linalg.pinv(matrix) ## after replaced by Neumann
         
         def get_single_indirect_hessian(partial_xx_inv, partial_xw):
             return partial_xw.t().mm(partial_xx_inv.mm(partial_xw))
@@ -270,7 +270,7 @@ class MUterRemover(Remover):
                 inner_out.requires_grad = True
                 label = label.to(self.basic_neter.device)
 
-                partial_xx_list.append(get_partial_xx(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1)) # TODO the output dimesion problem, nned to be reshape
+                partial_xx_list.append(get_partial_xx(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1)) # TODO the output dimesion problem, need to be reshape
                 partial_xw_list.append(get_partial_xw(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1))
             
             partial_xx_tensor = torch.stack(partial_xx_list, 0) # expected tensor shape is [total_batch, x_size, s_size]
@@ -282,7 +282,7 @@ class MUterRemover(Remover):
             batch_get_inverse = vmap(get_single_inverse)
             total_lenth = partial_xx_tensor.shape[0]
             batch_numbers = math.ceil(total_lenth / mini_batch)
-            partial_xx_inv_list = [batch_get_inverse(partial_xx_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]) for i in range(batch_numbers)]
+            partial_xx_inv_list = [batch_get_inverse(partial_xx_tensor[dex * mini_batch : min((dex + 1) * mini_batch, total_lenth)]) for dex in range(batch_numbers)]
             partial_xx_inv_tensor = torch.cat(partial_xx_inv_list, 0)
             
             del partial_xx_inv_list
@@ -290,9 +290,9 @@ class MUterRemover(Remover):
             
             batch_get_indirect_hessian = vmap(get_single_indirect_hessian, in_dims=(0, 0))
             indirect_hessian_list = [batch_get_indirect_hessian(
-                partial_xx_inv_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)],
-                partial_xw_tensor[i * mini_batch : min((i + 1) * mini_batch, total_lenth)]
-            ).sum(0) for i in range(batch_numbers)]
+                partial_xx_inv_tensor[dex * mini_batch : min((dex + 1) * mini_batch, total_lenth)],
+                partial_xw_tensor[dex * mini_batch : min((dex + 1) * mini_batch, total_lenth)]
+            ).sum(0) for dex in range(batch_numbers)]
 
             indirect_hessian_tensor = torch.stack(indirect_hessian_list, 0)
             del indirect_hessian_list
@@ -336,11 +336,13 @@ class NewtonRemover(Remover):
     def Unlearning(self, head, rear):
 
         self.Load_matrix()
+
         self.matrix -= self.get_pure_hessian(head=head, rear=rear)
         if self.grad == None:
             self.grad = self.get_sum_grad(head=head, rear=rear)
         else:
             self.grad += self.get_sum_grad(head=head, rear=rear)
+
         self.Save_matrix()
 
         self.Update_net_parameters()
@@ -356,10 +358,12 @@ class InfluenceRemover(Remover):
     def Unlearning(self, head, rear): 
 
         self.Load_matrix()
+
         if self.grad == None:
             self.grad = self.get_sum_grad(head=head, rear=rear)
         else:
             self.grad += self.get_sum_grad(head=head, rear=rear)
+
         self.Update_net_parameters()
 
         self.matrix -= self.get_pure_hessian(head=head, rear=rear)
@@ -377,11 +381,13 @@ class FisherRemover(Remover):
     def Unlearning(self, head, rear):
 
         self.Load_matrix()
+
         self.matrix -= self.get_fisher_matrix(head=head, rear=rear)
         if self.grad == None:
             self.grad = self.get_sum_grad(head=head, rear=rear)
         else:
             self.grad += self.get_sum_grad(head=head, rear=rear)
+            
         self.Save_matrix()
 
         self.Update_net_parameters()

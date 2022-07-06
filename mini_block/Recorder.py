@@ -4,6 +4,7 @@ import torch
 import time
 import numpy as np
 
+import matplotlib.pyplot as plt
 
 class Recorder:
 
@@ -72,8 +73,8 @@ class Recorder:
     
     def log_metrics(self, retrain_neter, compared_remover):
 
-        # self.metrics_clean_acc_record(compared_remover.remove_method, compared_remover.neter.test(isTrainset=False, isAttack=False))
-        # self.metrics_perturbed_acc_record(compared_remover.remove_method, compared_remover.neter.test(isTrainset=False, isAttack=True))
+        self.metrics_clean_acc_record(compared_remover.remove_method, compared_remover.neter.test(isTrainset=False, isAttack=False))
+        self.metrics_perturbed_acc_record(compared_remover.remove_method, compared_remover.neter.test(isTrainset=False, isAttack=True))
         self.metrics_distance_record(retrain_neter=retrain_neter, compared_remover=compared_remover)
 
 
@@ -100,21 +101,21 @@ class Recorder:
         if os.path.exists(distance_path) == False:
             os.makedirs(distance_path)
 
-        for key, value in self.time_dict:
-            time_path = os.path.join(time_path, '{}_times{}.npy'.format(key, self.args.times))
-            np.save(time_path, value)
+        for key, value in self.time_dict.items():
+            save_path = os.path.join(time_path, '{}_times{}.npy'.format(key, self.args.times))
+            np.save(save_path, value)
 
-        for key, value in self.clean_acc_dict:
-            clean_acc_path = os.path.join(clean_acc_path, '{}_times{}.npy'.format(key, self.args.times))
-            np.save(clean_acc_path, value)
+        for key, value in self.clean_acc_dict.items():
+            save_path = os.path.join(clean_acc_path, '{}_times{}.npy'.format(key, self.args.times))
+            np.save(save_path, value)
             
-        for key, value in self.perturbed_acc_dict:
-            perturbed_acc_path = os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(key, self.args.times))
-            np.save(perturbed_acc_path, value)
+        for key, value in self.perturbed_acc_dict.items():
+            save_path = os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(key, self.args.times))
+            np.save(save_path, value)
 
-        for key, value in self.distance_dict:
-            distance_path = os.path.join(distance_path, '{}_times{}.npy'.format(key, self.args.times))
-            np.save(distance_path, value)
+        for key, value in self.distance_dict.items():
+            save_path = os.path.join(distance_path, '{}_times{}.npy'.format(key, self.args.times))
+            np.save(save_path, value)
 
     def load(self, method_list = ['MUter', 'Newton_delta', 'Influence_delta', 'Fisher_delta', 'Newton', 'Influence', 'Fisher'], time_method_list=['Retrain', 'MUter', 'SISA']):
         
@@ -124,16 +125,24 @@ class Recorder:
         distance_path = os.path.join(self.root_path, 'metrics', 'distance')
 
         for method in method_list:
-            self.clean_acc_dict[method] = np.load(os.path.join(clean_acc_path, '{}_times{}'.format(method, self.args.times)))
-            self.perturbed_acc_dict[method] = np.load(os.path.join(perturbed_acc_path, '{}_times{}'.format(method, self.args.times)))
-            self.distance_dict[method] = np.load(os.path.join(distance_path, '{}_times{}'.f ormat(method, self.args.times)))
+
+            if os.path.exists(os.path.join(clean_acc_path, '{}_times{}.npy'.format(method, self.args.times))):
+                self.clean_acc_dict[method] = np.load(os.path.join(clean_acc_path, '{}_times{}.npy'.format(method, self.args.times)))
+
+            if os.path.exists(os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(method, self.args.times))):
+                self.perturbed_acc_dict[method] = np.load(os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(method, self.args.times)))
+
+            if os.path.exists(os.path.join(distance_path, '{}_times{}.npy'.format(method, self.args.times))):
+                self.distance_dict[method] = np.load(os.path.join(distance_path, '{}_times{}.npy'.format(method, self.args.times)))
 
         for method in time_method_list:
-            self.time_dict[method] = np.load(os.path.join(time_path, '{}_times{}'.format(method, self.args.times)))
+
+            if os.path.exists(os.path.join(time_path, '{}_times{}.npy'.format(method, self.args.times))):
+                self.time_dict[method] = np.load(os.path.join(time_path, '{}_times{}.npy'.format(method, self.args.times)))
 
 
 
 
 if __name__ == "__main__":
 
-    print(time.ctime())
+    pass

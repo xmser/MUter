@@ -77,7 +77,7 @@ neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param
 
 # after pre save model, we could load model
 neter.load_model()
-# neter.initialization(isCover=True)
+# neter.initialization(isCover=True)  # init generate the adv samples, inner output files.
 
 # sisaer = SISA(dataer=dataer, args=args, shards_num=5, slices_num=5)
 # sisaer.Reload()
@@ -103,12 +103,12 @@ neter.load_model()
 # ### stage 2) pre calculate the matrix, store and load
 # ########
 
-# muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
+muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
 newton_delta = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Newton_delta', args=args)
 newton = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Newton', args=args)
 influence_delta = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Influence_delta', args=args)
 influence = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Influence', args=args)
-fisher_delta = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Fisher', args=args)
+fisher_delta = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Fisher_delta', args=args)
 fisher = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Fisher', args=args)
 
 
@@ -134,10 +134,10 @@ for remain_head in range(args.remove_batch, args.remove_numbers + 1, args.remove
 
 
     ## 3) for MUter
-    # unlearning_time = muter.Unlearning(head=remove_head, rear=remain_head)
+    unlearning_time = muter.Unlearning(head=remove_head, rear=remain_head)
 
-    # recorder.metrics_time_record(method=muter.remove_method, time=unlearning_time)
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=muter)
+    recorder.metrics_time_record(method=muter.remove_method, time=unlearning_time)
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=muter)
 
     # ## 4) for Newton_delta, Newton
     newton_delta.Unlearning(head=remove_head, rear=remain_head)
