@@ -41,9 +41,9 @@ class Remover:
 
         self.f_theta = [] # input for the last layer
 
-
-        self.neter = Neter(dataer=self.dataer, args=self.args)
-        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
+        self.neter = None # init making the neter is None, everytime calling the unlearning method, register a new net copy from basic_neter
+        # self.neter = Neter(dataer=self.dataer, args=self.args)
+        # self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
 
 
         if os.path.exists(self.root_path) == False:
@@ -182,8 +182,9 @@ class Remover:
         return grad_tensor.sum(0)
 
     def Update_net_parameters(self, ):
-        
-        delta_w = cg_solve(self.matrix, self.grad)
+        damp_cof = 0.0001
+        damp_factor = torch.eye(self.matrix.shape[0]).cuda()
+        delta_w = cg_solve(self.matrix + damp_factor, self.grad)
         # delta_w = torch.mv(torch.linalg.pinv(self.matrix), self.grad)
         self.neter.Reset_last_layer(delta_w)
 
@@ -233,7 +234,8 @@ class MUterRemover(Remover):
             return criterion(output, label)
         
         def get_single_inverse(matrix):
-            return torch.linalg.pinv(matrix) ## after replaced by Neumann
+            # return torch.linalg.pinv(matrix) ## after replaced by Neumann
+            return 2 * torch.eye(matrix.shape[0]).cuda() - matrix
         
         def get_single_indirect_hessian(partial_xx_inv, partial_xw):
             return partial_xw.t().mm(partial_xx_inv.mm(partial_xw))
@@ -309,7 +311,16 @@ class MUterRemover(Remover):
 
     def Unlearning(self, head, rear, mini_batch=128):
         
+
         start = time.time()
+
+        if self.neter != None:
+            temp = self.neter
+            self.neter = None
+            del temp
+
+        self.neter = Neter(dataer=self.dataer, args=self.args)
+        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
 
         self.Load_matrix()
         self.matrix -= (self.get_pure_hessian(head=head, rear=rear) - self.get_indirect_hessian(head=head, rear=rear, mini_batch=mini_batch))
@@ -335,6 +346,14 @@ class NewtonRemover(Remover):
 
     def Unlearning(self, head, rear):
 
+        if self.neter != None:
+            temp = self.neter
+            self.neter = None
+            del temp
+
+        self.neter = Neter(dataer=self.dataer, args=self.args)
+        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
+
         self.Load_matrix()
 
         self.matrix -= self.get_pure_hessian(head=head, rear=rear)
@@ -356,6 +375,14 @@ class InfluenceRemover(Remover):
         self.Save_matrix()
 
     def Unlearning(self, head, rear): 
+
+        if self.neter != None:
+            temp = self.neter
+            self.neter = None
+            del temp
+
+        self.neter = Neter(dataer=self.dataer, args=self.args)
+        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
 
         self.Load_matrix()
 
@@ -379,6 +406,14 @@ class FisherRemover(Remover):
         self.Save_matrix()
 
     def Unlearning(self, head, rear):
+
+        if self.neter != None:
+            temp = self.neter
+            self.neter = None
+            del temp
+
+        self.neter = Neter(dataer=self.dataer, args=self.args)
+        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
 
         self.Load_matrix()
 

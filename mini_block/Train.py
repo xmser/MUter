@@ -350,22 +350,30 @@ class Neter:
         self.net.load_state_dict(torch.load(f=path))
         print('load done !')
 
-    def save_model(self, ):
+    def save_model(self, name=None):
 
         if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset))) == False:
             os.makedirs(os.path.join(self.default_path, '{}'.format(self.args.dataset)))
 
-        torch.save(self.net.state_dict(), f=os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs)))
-        print('save done !')
+        if name == None:
+            torch.save(self.net.state_dict(), f=os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs)))
+            print('save done !')
+        else:
+            torch.save(self.net.state_dict(), f=os.path.join(self.default_path, '{}'.format(self.args.dataset), '{}.pt'.format(name)))
+            print('save done !')
 
-    def load_model(self, ):
+    def load_model(self, name=None):
         
         if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs))) == False:
             raise Exception('Not save the model, please recheck !')
 
-        self.net.load_state_dict(torch.load(f=os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs))))
-        print('load done !')
-    
+        if name == None:
+            self.net.load_state_dict(torch.load(f=os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs))))
+            print('load done !')
+        else:
+            self.net.load_state_dict(torch.load(f=os.path.join(self.default_path, '{}'.format(self.args.dataset), '{}.pt'.format(name))))
+            print('load done !')
+
     def Reset_last_layer(self, delta_w):
         
         head = 0
