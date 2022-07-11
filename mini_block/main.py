@@ -75,13 +75,13 @@ dataer = Dataer(dataset_name=args.dataset)
 neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
 
 # after pre save model, we could load model
-neter.load_model()
+neter.load_model('retrain_model_0')
 # print('Train acc: {:.2f}%'.format(neter.test(isTrainset=True) * 100))
 # print('Test acc: {:.2f}%'.format(neter.test(isTrainset=False) * 100))
 # print('Adv Train test acc: {:.2f}%'.format(neter.test(isTrainset=True, isAttack=True)*100))
 # print('Adv Test acc: {:.2f}%'.format(neter.test(isTrainset=False, isAttack=True)*100))
 
-# neter.initialization(isCover=True)  # init generate the adv samples, inner output files.
+neter.initialization(isCover=True)  # init generate the adv samples, inner output files.
 
 # sisaer = SISA(dataer=dataer, args=args, shards_num=5, slices_num=5)
 # sisaer.Reload()
@@ -129,7 +129,7 @@ for remain_head in range(args.remove_batch, args.remove_numbers + 1, args.remove
     # ## 1) for retrain
     retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
     # # spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head)
-    retrain_neter.load_model()
+    retrain_neter.load_model('retrain_model_{}'.format(remain_head))
 
     # recorder.metrics_time_record(method='Retrain', time=spending_time)
 

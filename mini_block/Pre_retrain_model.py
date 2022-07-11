@@ -57,27 +57,32 @@ args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = '{}'.format(args.gpu_id)
 recorder = Recorder(args=args)
 
-# pretrain_param = None
-# if args.isPretrain:
-#     pretrain_param = {
-#         'layers': args.layers,
-#         'widen_factor': args.widen_factor,
-#         'droprate': args.droprate,
-#         'root_path': args.pretrain_path + '{}'.format(args.pretrain_model_number) + '.pt',
-#         'epochs': args.tuning_epochs,
-#         'lr': args.tuning_lr,
-#         'new_last_layer': get_layers(args.tuning_layer, isBias=args.isBias),
-#     }
+pretrain_param = None
+if args.isPretrain:
+    pretrain_param = {
+        'layers': args.layers,
+        'widen_factor': args.widen_factor,
+        'droprate': args.droprate,
+        'root_path': args.pretrain_path + '{}'.format(args.pretrain_model_number) + '.pt',
+        'epochs': args.tuning_epochs,
+        'lr': args.tuning_lr,
+        'new_last_layer': get_layers(args.tuning_layer, isBias=args.isBias),
+    }
 
 #####
 # Stage 1) traninig a roubust model for unlearning (adding SISA)
 #####
 
 dataer = Dataer(dataset_name=args.dataset)
-# neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
+neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
 
 # after pre save model, we could load model
-# neter.load_model()
+neter.load_model(name='retrain_model_10000')
+
+# print('Train acc: {:.2f}%'.format(neter.test(isTrainset=True) * 100))
+print('Test acc: {:.2f}%'.format(neter.test(isTrainset=False) * 100))
+# print('Adv Train test acc: {:.2f}%'.format(neter.test(isTrainset=True, isAttack=True)*100))
+print('Adv Test acc: {:.2f}%'.format(neter.test(isTrainset=False, isAttack=True)*100))
 # neter.initialization(isCover=True)  # init generate the adv samples, inner output files.
 
 # sisaer = SISA(dataer=dataer, args=args, shards_num=5, slices_num=5)
@@ -110,37 +115,37 @@ dataer = Dataer(dataset_name=args.dataset)
 # stage 4) post of unlearning 
 # ####
 
-for remain_head in range(0, args.remove_numbers, args.remove_batch + 1): ##TODO  !!! this remove_batch + 1 need to be remove_batch !!!
+# for remain_head in range(0, args.remove_numbers, args.remove_batch + 1): ##TODO  !!! this remove_batch + 1 need to be remove_batch !!!
 
-    remove_head = remain_head - args.remove_batch
-    print('Unlearning deomain [{} -- {})'.format(remove_head, remain_head))
+#     remove_head = remain_head - args.remove_batch
+#     print('Unlearning deomain [{} -- {})'.format(remove_head, remain_head))
 
-    pretrain_param = None
-    if args.isPretrain:
-        pretrain_param = {
-            'layers': args.layers,
-            'widen_factor': args.widen_factor,
-            'droprate': args.droprate,
-            'root_path': args.pretrain_path + '{}'.format(args.pretrain_model_number) + '.pt',
-            'epochs': args.tuning_epochs,
-            'lr': args.tuning_lr,
-            'new_last_layer': get_layers(args.tuning_layer, isBias=args.isBias),
-        }
+#     pretrain_param = None
+#     if args.isPretrain:
+#         pretrain_param = {
+#             'layers': args.layers,
+#             'widen_factor': args.widen_factor,
+#             'droprate': args.droprate,
+#             'root_path': args.pretrain_path + '{}'.format(args.pretrain_model_number) + '.pt',
+#             'epochs': args.tuning_epochs,
+#             'lr': args.tuning_lr,
+#             'new_last_layer': get_layers(args.tuning_layer, isBias=args.isBias),
+#         }
 
-    ## 1) for retrain
-    retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
-    spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head, isAdv=True)
-    recorder.metrics_time_record(method='Retrain', time=spending_time)
-    recorder.metrics_clean_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=False))
-    recorder.metrics_perturbed_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=True))
-    retrain_neter.save_model(name='tuning_10_retrain_model_{}'.format(remain_head))
-    del retrain_neter
+#     ## 1) for retrain
+#     retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
+#     spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head, isAdv=True)
+#     recorder.metrics_time_record(method='Retrain', time=spending_time)
+#     recorder.metrics_clean_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=False))
+#     recorder.metrics_perturbed_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=True))
+#     retrain_neter.save_model(name='tuning_10_retrain_model_{}'.format(remain_head))
+#     del retrain_neter
 
-    ## 2) for SISA
-    ## under construction
+#     ## 2) for SISA
+#     ## under construction
 
-# save information
-recorder.save()
+# # save information
+# recorder.save()
 
 
 
