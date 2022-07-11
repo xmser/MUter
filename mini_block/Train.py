@@ -142,9 +142,9 @@ class Neter:
         end_time = time.time()
 
         if isFinaltest:
-            print('Train acc: {:.2f}%'.format(self.test(isTrainset=True, self_loader=train_loader) * 100), end='  ')
+            print('Train acc: {:.2f}%'.format(self.test(isTrainset=True, self_loader=train_loader) * 100))
             print('Test acc: {:.2f}%'.format(self.test(isTrainset=False) * 100))
-            print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True, self_loader=train_loader)*100), end='  ')
+            print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True, self_loader=train_loader)*100))
             print('Adv Test acc: {:.2f}%'.format(self.test(isTrainset=False, isAttack=True)*100))
 
         if isAdv and isSave:

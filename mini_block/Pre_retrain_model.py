@@ -110,7 +110,7 @@ dataer = Dataer(dataset_name=args.dataset)
 # stage 4) post of unlearning 
 # ####
 
-for remain_head in range(args.remove_batch, args.remove_numbers + 1, args.remove_batch):
+for remain_head in range(0, args.remove_numbers, args.remove_batch + 1): ##TODO  !!! this remove_batch + 1 need to be remove_batch !!!
 
     remove_head = remain_head - args.remove_batch
     print('Unlearning deomain [{} -- {})'.format(remove_head, remain_head))
@@ -133,7 +133,7 @@ for remain_head in range(args.remove_batch, args.remove_numbers + 1, args.remove
     recorder.metrics_time_record(method='Retrain', time=spending_time)
     recorder.metrics_clean_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=False))
     recorder.metrics_perturbed_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=True))
-    retrain_neter.save_model(name='retrain_model_{}'.format(remain_head))
+    retrain_neter.save_model(name='tuning_10_retrain_model_{}'.format(remain_head))
     del retrain_neter
 
     ## 2) for SISA

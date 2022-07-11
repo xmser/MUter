@@ -10,6 +10,8 @@ where we abstract the remove way as class, the mainly fun here about such:
 7)method: test model (get from neter)
 """
 
+from builtins import print
+from unittest import result
 from tqdm import tqdm
 from Train import Neter
 import torch
@@ -20,6 +22,7 @@ from functorch import jacrev, make_functional, vmap
 import math
 from functorch import grad as fast_grad
 import time
+import copy
 
 class Remover:
     """
@@ -183,7 +186,7 @@ class Remover:
 
     def Update_net_parameters(self, ):
         damp_cof = 0.0001
-        damp_factor = torch.eye(self.matrix.shape[0]).cuda()
+        damp_factor = damp_cof * torch.eye(self.matrix.shape[0]).cuda()
         delta_w = cg_solve(self.matrix + damp_factor, self.grad)
         # delta_w = torch.mv(torch.linalg.pinv(self.matrix), self.grad)
         self.neter.Reset_last_layer(delta_w)
@@ -233,9 +236,21 @@ class MUterRemover(Remover):
             output = func(params, sample)
             return criterion(output, label)
         
-        def get_single_inverse(matrix):
+        def Neumann(matrix, multipler, series, times=100):
+
+            result = torch.zeros_like(matrix).cuda()
+
+            for steps in range(times):
+                result += series
+                series = series.mm(multipler)
+            return result
+
+        def get_single_inverse(matrix, multipler, series):
             # return torch.linalg.pinv(matrix) ## after replaced by Neumann
-            return 2 * torch.eye(matrix.shape[0]).cuda() - matrix
+            # I = 0.01 * torch.eye(matrix.shape[0]).cuda()  for inverse
+            return Neumann(matrix, multipler, series)
+            # return torch.linalg.inv(matrix + I)
+            # return 2 * torch.eye(matrix.shape[0]).cuda() - matrix
         
         def get_single_indirect_hessian(partial_xx_inv, partial_xw):
             return partial_xw.t().mm(partial_xx_inv.mm(partial_xw))
@@ -275,6 +290,7 @@ class MUterRemover(Remover):
                 partial_xx_list.append(get_partial_xx(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1)) # TODO the output dimesion problem, need to be reshape
                 partial_xw_list.append(get_partial_xw(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1))
             
+
             partial_xx_tensor = torch.stack(partial_xx_list, 0) # expected tensor shape is [total_batch, x_size, s_size]
             partial_xw_tensor = torch.stack(partial_xw_list, 0) #expected tensor shape is [total_batch, x_size, w_size]
 
@@ -284,7 +300,22 @@ class MUterRemover(Remover):
             batch_get_inverse = vmap(get_single_inverse)
             total_lenth = partial_xx_tensor.shape[0]
             batch_numbers = math.ceil(total_lenth / mini_batch)
-            partial_xx_inv_list = [batch_get_inverse(partial_xx_tensor[dex * mini_batch : min((dex + 1) * mini_batch, total_lenth)]) for dex in range(batch_numbers)]
+            partial_xx_inv_list = []
+            for dex in range(batch_numbers):
+                sub_partial_xx_tensor = partial_xx_tensor[dex * mini_batch : min((dex + 1) * mini_batch, total_lenth)]
+                identiy = torch.eye(sub_partial_xx_tensor.shape[1]).reshape((1, sub_partial_xx_tensor.shape[1], sub_partial_xx_tensor.shape[1]))
+                batch_identiy = identiy.repeat(sub_partial_xx_tensor.shape[0], 1, 1).cuda()
+                series = copy.deepcopy(batch_identiy).cuda()
+                multipler = batch_identiy - sub_partial_xx_tensor
+                partial_xx_inv_list.append(batch_get_inverse(sub_partial_xx_tensor, multipler, series))
+                
+                del batch_identiy
+                del multipler
+                del series
+
+            # partial_xx_inv_list = [batch_get_inverse(partial_xx_tensor[dex * mini_batch : min((dex + 1) * mini_batch, total_lenth)]) for dex in range(batch_numbers)]
+            
+                
             partial_xx_inv_tensor = torch.cat(partial_xx_inv_list, 0)
             
             del partial_xx_inv_list
