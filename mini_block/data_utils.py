@@ -1,17 +1,17 @@
-from ast import Break
 import os
 import torch
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data.sampler import Sampler
+from utils import get_random_sequence
 
 
 # TODO : the classtype loader for inner_output is not done !!!
 
 class SelfSampler(Sampler):
 
-    def __init__(self, dataset, head=-1, rear=-1):
+    def __init__(self, dataset, head=-1, rear=-1, sequence=[]):
         
         self.head = head
         self.rear = rear
@@ -23,6 +23,9 @@ class SelfSampler(Sampler):
 
         self.lenth = self.rear - self.head
         self.indices = list(range(self.head, self.rear))
+        
+        if len(sequence) > 0:
+            self.indices = sequence[self.head : self.rear]
 
     def __iter__(self):
         
@@ -70,7 +73,7 @@ class CustomSampler(Sampler):
 
 class Dataer:
 
-    def __init__(self, dataset_name):
+    def __init__(self, dataset_name, sequence=[]):
         
         self.dataset_name = dataset_name
         self.default_path = './data'
@@ -107,7 +110,25 @@ class Dataer:
         self.train_data_lenth = int(len(self.datasets[0]))
         self.test_data_lenth = int(len(self.datasets[1]))
 
-    def get_loader(self, head=-1, rear=-1, batch_size=128, isTrain=True, isAdv=False, isInner=False, isClassType=False, isGetOne=False, id=[0, ]):
+        self.sequence = sequence
+
+    def set_sequence(self, sequence):
+        
+        self.sequence = sequence
+
+    def get_loader(
+        self, 
+        head=-1, 
+        rear=-1, 
+        batch_size=128, 
+        isTrain=True, 
+        isAdv=False, 
+        isInner=False, 
+        isClassType=False, 
+        isGetOne=False, 
+        id=[0, ],
+        ):
+
 
         if isInner:  # TODO need to be update for ClassType... 
             return self.get_inner_output_loader(batch_size=batch_size, head=head, rear=rear, isTrain=isTrain, isAdv=isAdv)
@@ -121,17 +142,17 @@ class Dataer:
                             return DataLoader(self.datasets[1], batch_size=batch_size)
                     else:
                         if isTrain:
-                            self_sampler = SelfSampler(self.datasets[0], head=head, rear=rear)
+                            self_sampler = SelfSampler(self.datasets[0], head=head, rear=rear, sequence=self.sequence)
                             return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
                         else:
-                            self_sampler = SelfSampler(self.datasets[1], head=head, rear=rear)
+                            self_sampler = SelfSampler(self.datasets[1], head=head, rear=rear, sequence=self.sequence)
                             return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
                 else:
                     adv_data = self.get_adv_samples(isTrain=isTrain)
                     if head == -1 and rear == -1:    
                         return DataLoader(adv_data, batch_size=batch_size)
                     else:
-                        self_sampler = SelfSampler(adv_data, head=head, rear=rear)
+                        self_sampler = SelfSampler(adv_data, head=head, rear=rear, sequence=self.sequence)
                         return DataLoader(adv_data, batch_size=batch_size, sampler=self_sampler)
             else:
                 if isAdv:
@@ -146,7 +167,14 @@ class Dataer:
                     else:
                         return self.get_loader_MaskOneClass(masked_id=id, batch_size=batch_size, isTrain=isTrain)
     
-    def get_inner_output_loader(self, batch_size=128, head=-1, rear=-1, isTrain=True, isAdv=False):
+    def get_inner_output_loader(
+        self, 
+        batch_size=128, 
+        head=-1, 
+        rear=-1, 
+        isTrain=True, 
+        isAdv=False,
+        ):
 
         if isAdv:
             adv_str = 'adv'
@@ -167,7 +195,7 @@ class Dataer:
         if head == -1 and rear == -1:
             return DataLoader(data, batch_size=batch_size, shuffle=False)
         else:
-            self_sampler = SelfSampler(data, head=head, rear=rear)
+            self_sampler = SelfSampler(data, head=head, rear=rear, sequence=self.sequence)
             return DataLoader(data, batch_size=batch_size, sampler=self_sampler)
 
     def get_adv_samples(self, isTrain=True):
@@ -242,12 +270,14 @@ if __name__ == "__main__":
     os.environ['CUDA_VISIBLE_DEVICES'] = '2'
     dataer = Dataer(dataset_name='Cifar10')
     
-    train_loader = dataer.get_loader(batch_size=1, isTrain=False)
+    sequence = get_random_sequence(dataer.train_data_lenth, 10, seed=666)
+    dataer.set_sequence(sequence=sequence)
+    train_loader = dataer.get_loader(batch_size=1, isTrain=True, rear=100)
+
 
     for index, (image, label) in enumerate(train_loader):
-        print(image.shape)
         print(label)
-        if index == 100:
+        if index == 20:
             break
 
 

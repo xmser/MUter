@@ -1,4 +1,3 @@
-from dis import dis
 import os
 import torch
 import time
@@ -6,19 +5,28 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
+
 class Recorder:
 
     def __init__(self, args):
+        """
+        Args:
+            args (_type_): args have 'adv_type' and 'isBatchRemove', using this distingusih different remove method,
+            like FGSM_1_Fisher_delta_times0.npy for batch, PGD_0_Newton_times2.npy for no batch
+        """
         
         self.time_dict = {}
         self.clean_acc_dict = {}
         self.perturbed_acc_dict = {}
         self.distance_dict = {}
         self.args = args
+        self.prefix = '{}_{}_'.format(self.args.adv_type, self.args.isBatchRemove)
 
         self.root_path = 'record/{}'.format(args.dataset)
         if os.path.exists(self.root_path) == False:
             os.makedirs(self.root_path)
+
+        self.times = self.args.times
         
 
     def commom_log(self, str):
@@ -38,6 +46,7 @@ class Recorder:
     
     def metrics_time_record(self, method, time):
 
+        method = self.prefix + method
         if method not in self.time_dict:
             self.time_dict[method] = []
         
@@ -45,6 +54,7 @@ class Recorder:
 
     def metrics_clean_acc_record(self, method, acc):
 
+        method = self.prefix + method
         if method not in self.clean_acc_dict:
             self.clean_acc_dict[method] = []
 
@@ -52,6 +62,7 @@ class Recorder:
 
     def metrics_perturbed_acc_record(self, method, acc):
 
+        method = self.prefix + method
         if method not in self.perturbed_acc_dict:
             self.perturbed_acc_dict[method] = []
 
@@ -59,8 +70,9 @@ class Recorder:
     
     def metrics_distance_record(self, retrain_neter, compared_remover):
 
-        if compared_remover.remove_method not in self.distance_dict:
-            self.distance_dict[compared_remover.remove_method] = []
+        method = self.prefix + compared_remover.remove_method
+        if method not in self.distance_dict:
+            self.distance_dict[method] = []
 
         distance = torch.tensor(0.0).cuda()
         # for name, param in retrain_neter.net.module.name_parameters():
@@ -69,7 +81,7 @@ class Recorder:
         compared_fc = compared_remover.neter.net.module.fc
         for (paramA, paramB) in zip(retrain_fc.parameters(), compared_fc.parameters()):
             distance += (paramA.data - paramB.data).pow(2.0).sum().detach()
-        self.distance_dict[compared_remover.remove_method].append(distance.sqrt().cpu().numpy())
+        self.distance_dict[method].append(distance.sqrt().cpu().numpy())
     
     def log_metrics(self, retrain_neter, compared_remover):
 
@@ -117,8 +129,16 @@ class Recorder:
             save_path = os.path.join(distance_path, '{}_times{}.npy'.format(key, self.args.times))
             np.save(save_path, value)
 
-    def load(self, method_list = ['MUter', 'Newton_delta', 'Influence_delta', 'Fisher_delta', 'Newton', 'Influence', 'Fisher'], time_method_list=['Retrain', 'MUter', 'SISA']):
+    def load(
+        self, 
+        method_list = ['MUter', 'Newton_delta', 'Influence_delta', 'Fisher_delta', 'Newton', 'Influence', 'Fisher'], 
+        time_method_list=['Retrain', 'MUter', 'SISA'],
+        times=None,
+        ):
         
+        if times != None:
+            self.times = times
+
         time_path = os.path.join(self.root_path, 'metrics', 'time')
         clean_acc_path = os.path.join(self.root_path, 'metrics', 'clean_acc')
         perturbed_acc_path = os.path.join(self.root_path, 'metrics', 'perturbed_acc')
@@ -126,19 +146,23 @@ class Recorder:
 
         for method in method_list:
 
-            if os.path.exists(os.path.join(clean_acc_path, '{}_times{}.npy'.format(method, self.args.times))):
-                self.clean_acc_dict[method] = np.load(os.path.join(clean_acc_path, '{}_times{}.npy'.format(method, self.args.times)))
+            method = self.prefix + method
 
-            if os.path.exists(os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(method, self.args.times))):
-                self.perturbed_acc_dict[method] = np.load(os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(method, self.args.times)))
+            if os.path.exists(os.path.join(clean_acc_path, '{}_times{}.npy'.format(method, self.times))):
+                self.clean_acc_dict[method] = np.load(os.path.join(clean_acc_path, '{}_times{}.npy'.format(method, self.times)))
 
-            if os.path.exists(os.path.join(distance_path, '{}_times{}.npy'.format(method, self.args.times))):
-                self.distance_dict[method] = np.load(os.path.join(distance_path, '{}_times{}.npy'.format(method, self.args.times)))
+            if os.path.exists(os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(method, self.times))):
+                self.perturbed_acc_dict[method] = np.load(os.path.join(perturbed_acc_path, '{}_times{}.npy'.format(method, self.times)))
+
+            if os.path.exists(os.path.join(distance_path, '{}_times{}.npy'.format(method, self.times))):
+                self.distance_dict[method] = np.load(os.path.join(distance_path, '{}_times{}.npy'.format(method, self.times)))
 
         for method in time_method_list:
 
-            if os.path.exists(os.path.join(time_path, '{}_times{}.npy'.format(method, self.args.times))):
-                self.time_dict[method] = np.load(os.path.join(time_path, '{}_times{}.npy'.format(method, self.args.times)))
+            method = self.prefix + method
+
+            if os.path.exists(os.path.join(time_path, '{}_times{}.npy'.format(method, self.times))):
+                self.time_dict[method] = np.load(os.path.join(time_path, '{}_times{}.npy'.format(method, self.times)))
 
 
 

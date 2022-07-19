@@ -197,6 +197,7 @@ class Remover:
         pass
     
 
+
 class MUterRemover(Remover):
     """
     MUter using the remove function \delta_w = (\partial_ww - \partial_wx.\partial_xx^{-1}.\partial_xw)^{-1}.g
@@ -366,6 +367,140 @@ class MUterRemover(Remover):
         end = time.time()
 
         return (end - start)
+
+class SchurMUterRemover(MUterRemover):
+    """extend from MUter, need his get_indirect_hessian.
+
+    Args:
+        MUterRemover (_type_): _description_
+    """
+    def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
+        # like MUter, the pre work save the total D_ww
+        super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args) 
+    
+    def get_indirect_second_order_info(self, head=-1, rear=-1):
+        """mainly return the \partial_wx, \partial_xx, \partial_xw.
+        
+
+        Args:
+            head (int, optional): _description_. Defaults to -1.
+            rear (int, optional): _description_. Defaults to -1.
+        """
+        def compute_loss(params, sample, label):
+            output = func(params, sample)
+            return criterion(output, label)
+        
+        if head + 1 != rear:
+            raise Exception('The head, rear value not satisfy the requirement !')
+
+        classifier = self.basic_neter.net.module.fc.to(self.basic_neter.device) #get the last layer
+
+        func, classifier_params = make_functional(classifier)
+        criterion = nn.CrossEntropyLoss(reduction='mean')
+
+        loader = self.dataer.get_loader( # get the inner output loader for the last layer
+            head=head, 
+            rear=rear, 
+            batch_size=1,  # using the total_size and sum_loss to get the pure_hessian
+            isAdv=self.isDelta,
+            isInner=True
+        )
+        get_partial_xx = jacrev(jacrev(compute_loss, argnums=1), argnums=1)
+        get_partial_xw = jacrev(jacrev(compute_loss, argnums=1), argnums=0)
+
+        partial_xw = None
+        partial_xx = None
+
+        for (inner_out, label) in loader:
+            inner_out = inner_out.to(self.basic_neter.device)
+            inner_out.requires_grad = True
+            label = label.to(self.basic_neter.device)
+
+            partial_xx = get_partial_xx(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1)
+            partial_xw = get_partial_xw(classifier_params, inner_out, label)[0].detach().reshape(inner_out.shape[1], -1)
+
+        # return like H12, H21, H22
+        return partial_xw.t(), partial_xw, -partial_xx
+
+    # buiding the block matrix
+    def buliding_matrix(self, M, H_11, H_12, H_22, H_21):
+        """
+        version for torch
+        using gpu without data change between gpu and cpu
+        M: memory matrix [w_size, w_size]
+        H_11: partial_ww [w_size, w_size]
+        H_12: partial_wx [w_size, x_size]
+        H_22: partial_xx [x_size, x_size]
+        H_21: partial_xw [x_size, w_size]
+
+        retrun | M-H_11    H_12 |
+               |  H21      H_22 |
+        """
+        device = 'cuda'
+        A = torch.cat([torch.cat([M-H_11, H_12], dim=1), torch.cat([H_21, H_22], dim=1)], dim=0).to(device)
+        print('black matrix A shape {}, type {}'.format(A.shape, type(A)))
+        return A.detach()
+
+
+    def Unlearning(self, head=-1, rear=-1, mini_batch=128):
+        """
+        where the method here split into two part, 
+        head-->rear have at least one point, if rear-head==1, just into part_2, else first into part_1 to do pre delete operation
+        delete about (rear-head-1) points' influnce for M[D_{ww}]
+        1) part_1: like MUterRemover Unlearning, remove the (rear-head-1) points' influence.
+        2) part_2: using the block_matrix function to do unlearning, the update_net_param need to be rewrite.
+        Args:
+            head (int, optional): _description_. Defaults to -1.
+            rear (int, optional): _description_. Defaults to -1.
+            mini_batch (int, optional): _description_. Defaults to 128.
+        """
+        if head == -1:
+            head = 0
+        if rear == -1:
+            rear = self.dataer.train_data_lenth
+        
+        self.Load_matrix()
+        ## part 1
+        if rear - head > 1: # if > 1, into part_1
+            self.matrix -= (self.get_pure_hessian(head=head, rear=rear-1) - self.get_indirect_hessian(head=head, rear=rear-1, mini_batch=mini_batch))
+        
+        if self.grad == None:
+            self.grad = self.get_sum_grad(head=head, rear=rear)
+        else:
+            self.grad += self.get_sum_grad(head=head, rear=rear)
+
+        ## part 2 
+        strat_time = time.time()
+
+        H_11 = self.get_pure_hessian(head=rear-1, rear=rear)
+        H_12, H_21, H_22 = self.get_indirect_second_order_info(head=rear-1, rear=rear)
+        block_matrix = self.buliding_matrix(self.matrix, H_11, H_12, H_22, H_21)
+        grad_extension = torch.cat((self.grad, torch.zeros(H_22.shape[0]).to(self.basic_neter.device)), dim=0)
+
+        if self.neter != None:
+            temp = self.neter
+            self.neter = None
+            del temp
+
+        self.neter = Neter(dataer=self.dataer, args=self.args)
+        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
+
+        # damp_cof = 0.0001
+        # damp_factor = damp_cof * torch.eye(self.matrix.shape[0]).cuda()
+        delta_w = cg_solve(block_matrix, grad_extension)
+        delta_w = delta_w[:H_11.shape[0]]
+        # delta_w = torch.mv(torch.linalg.pinv(self.matrix), self.grad)
+        self.neter.Reset_last_layer(delta_w)
+
+        print('Update done !')
+
+        end_time = time.time()
+        # after the unealing stage, delete the last point influence.            
+        self.matrix -= (self.get_pure_hessian(head=rear-1, rear=rear) - self.get_indirect_hessian(head=rear-1, rear=rear, mini_batch=mini_batch))
+        self.Save_matrix()
+
+        return end_time - strat_time
+
 
 class NewtonRemover(Remover):
 

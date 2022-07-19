@@ -15,6 +15,10 @@ def args():
     parser.add_argument('--gpu_id', default=1, type=int)
     parser.add_argument('--ngpu', default=1, type=int)
 
+    # for remove type chose
+    parser.add_argument('--adv_type', type=str, default='FGSM', help='the adv training type')
+    parser.add_argument('--isBatchRemove', type=int, default=0, help='0: no batch, Schur complement. 1: batch, Neumann')
+
     # for pretrain type
     parser.add_argument('--isPretrain', default=True, type=bool)
     parser.add_argument('--layers', default=28, type=int, help='total number of layers')

@@ -1,13 +1,16 @@
+from random import choices
+from email.policy import default
 import torch
 import argparse
 import os
 
 from Train import Neter
-from Remover import MUterRemover, NewtonRemover, InfluenceRemover, FisherRemover
+from Remover import MUterRemover, NewtonRemover, InfluenceRemover, FisherRemover, SchurMUterRemover
 from Recorder import Recorder
 from data_utils import Dataer
 from utils import get_layers
 from SISA import SISA
+from utils import get_random_sequence
 """
 mainly code for machine unlearning, un see the detail of
 the concrete code about how to calculate the matrix and its inverse
@@ -24,9 +27,13 @@ parser.add_argument('--device', type=int, default=0, help='the cuda device numbe
 parser.add_argument('--epochs', type=int, default=300, help='custom the training epochs')
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
-parser.add_argument('--times', type=int, default=0, help='do repeat experiments')
-parser.add_argument('--gpu_id', default=1, type=int)
+parser.add_argument('--times', type=int, default=1, help='do repeat experiments')
+parser.add_argument('--gpu_id', default=2, type=int)
 parser.add_argument('--ngpu', default=1, type=int)
+
+# for remove type chose
+parser.add_argument('--adv_type', type=str, default='FGSM', help='the adv training type')
+parser.add_argument('--isBatchRemove', type=int, default=1, help='0: no batch, Schur complement. 1: batch, Neumann')
 
 # for pretrain type
 parser.add_argument('--isPretrain', default=True, type=bool)
@@ -40,9 +47,18 @@ parser.add_argument('--tuning_lr', default=0.001, type=float)
 parser.add_argument('--tuning_layer', default='linear', type=str)
 parser.add_argument('--isBias', default=False, type=bool)
 
+# for repeat experiments
+parser.add_argument('--seed', default=666, type=int, help='determate the remove data id')
+
 args = parser.parse_args()
 
 
+remove_squence_dict = {
+    0: [1, 200, 500, 1000, 2000, 4000],
+    1: [remain_head for remain_head in range(args.remove_batch, args.remove_numbers + 1, args.remove_batch)]
+}
+
+remove_squence = remove_squence_dict[args.isBatchRemove]
 
 """
 1) traninig a roubust model for unlearning (adding SISA)
@@ -72,10 +88,13 @@ if args.isPretrain:
 #####
 
 dataer = Dataer(dataset_name=args.dataset)
+resort_sequence = get_random_sequence(dataer.train_data_lenth, resort_lenth=args.remove_numbers, seed=args.seed)
+dataer.set_sequence(sequence=resort_sequence)
+
 neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
 
 # after pre save model, we could load model
-neter.load_model('retrain_model_0')
+neter.load_model('FGSM_Schur_model_ten_0_times{}'.format(args.times))
 # print('Train acc: {:.2f}%'.format(neter.test(isTrainset=True) * 100))
 # print('Test acc: {:.2f}%'.format(neter.test(isTrainset=False) * 100))
 # print('Adv Train test acc: {:.2f}%'.format(neter.test(isTrainset=True, isAttack=True)*100))
@@ -106,8 +125,11 @@ neter.initialization(isCover=True)  # init generate the adv samples, inner outpu
 # # ########
 # # ### stage 2) pre calculate the matrix, store and load
 # # ########
+if args.isBatchRemove == 1:
+    muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
+else:
+    muter = SchurMUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
 
-muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
 newton_delta = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Newton_delta', args=args)
 newton = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Newton', args=args)
 influence_delta = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Influence_delta', args=args)
@@ -121,15 +143,17 @@ fisher = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_m
 # stage 4) post of unlearning 
 # ####
 
-for remain_head in range(args.remove_batch, args.remove_numbers + 1, args.remove_batch):
+for index, remain_head in enumerate(remove_squence):
 
-    remove_head = remain_head - args.remove_batch
+    remove_head = 0
+    if index > 0:
+        remove_head = remove_squence[index - 1]
     print('Unlearning deomain [{} -- {})'.format(remove_head, remain_head))
 
     # ## 1) for retrain
     retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
     # # spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head)
-    retrain_neter.load_model('retrain_model_{}'.format(remain_head))
+    retrain_neter.load_model('FGSM_Schur_model_ten_{}_times{}'.format(remain_head, args.times))
 
     # recorder.metrics_time_record(method='Retrain', time=spending_time)
 

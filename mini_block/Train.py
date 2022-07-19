@@ -40,6 +40,11 @@ class Neter:
             'Cifar10': (8/255, 2/255, 10),
             'Mnist': (2/255, 0.4/255, 20),
         }
+        if self.args.adv_type == 'FGSM':
+            self.atk_info = {
+                'Cifar10': (8/255, 8/255, 1),
+                'MNist': (2/255, 2/255, 1),
+            }
 
         if self.isTuning == False:
             if dataer.dataset_name == 'Mnist':
@@ -364,7 +369,7 @@ class Neter:
 
     def load_model(self, name=None):
         
-        if os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs))) == False:
+        if name == None and os.path.exists(os.path.join(self.default_path, '{}'.format(self.args.dataset), 'model_{}.pt'.format(self.args.tuning_epochs))) == False:
             raise Exception('Not save the model, please recheck !')
 
         if name == None:
