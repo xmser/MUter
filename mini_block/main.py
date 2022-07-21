@@ -28,12 +28,12 @@ parser.add_argument('--epochs', type=int, default=300, help='custom the training
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
 parser.add_argument('--times', type=int, default=1, help='do repeat experiments')
-parser.add_argument('--gpu_id', default=2, type=int)
+parser.add_argument('--gpu_id', default=1, type=int)
 parser.add_argument('--ngpu', default=1, type=int)
 
 # for remove type chose
-parser.add_argument('--adv_type', type=str, default='FGSM', help='the adv training type')
-parser.add_argument('--isBatchRemove', type=int, default=1, help='0: no batch, Schur complement. 1: batch, Neumann')
+parser.add_argument('--adv_type', type=str, default='FGSN', help='the adv training type')
+parser.add_argument('--isBatchRemove', type=int, default=0, help='0: no batch, Schur complement. 1: batch, Neumann')
 
 # for pretrain type
 parser.add_argument('--isPretrain', default=True, type=bool)
@@ -94,7 +94,7 @@ dataer.set_sequence(sequence=resort_sequence)
 neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
 
 # after pre save model, we could load model
-neter.load_model('FGSM_Schur_model_ten_0_times{}'.format(args.times))
+neter.load_model('FGSM_Batch_model_ten_0_times{}'.format(args.times))
 # print('Train acc: {:.2f}%'.format(neter.test(isTrainset=True) * 100))
 # print('Test acc: {:.2f}%'.format(neter.test(isTrainset=False) * 100))
 # print('Adv Train test acc: {:.2f}%'.format(neter.test(isTrainset=True, isAttack=True)*100))
@@ -153,7 +153,7 @@ for index, remain_head in enumerate(remove_squence):
     # ## 1) for retrain
     retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
     # # spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head)
-    retrain_neter.load_model('FGSM_Schur_model_ten_{}_times{}'.format(remain_head, args.times))
+    retrain_neter.load_model('FGSM_Batch_model_ten_{}_times{}'.format(remain_head, args.times))
 
     # recorder.metrics_time_record(method='Retrain', time=spending_time)
 

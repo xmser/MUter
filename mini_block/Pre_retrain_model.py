@@ -28,7 +28,7 @@ parser.add_argument('--epochs', type=int, default=300, help='custom the training
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
 parser.add_argument('--times', type=int, default=0, help='do repeat experiments')
-parser.add_argument('--gpu_id', default=2, type=int)
+parser.add_argument('--gpu_id', default=3, type=int)
 parser.add_argument('--ngpu', default=1, type=int)
 
 # for remove type chose
@@ -89,8 +89,10 @@ remove_squence_dict = {
 remove_squence = remove_squence_dict[args.isBatchRemove]
 
 dataer = Dataer(dataset_name=args.dataset)
-resort_sequence = get_random_sequence(dataer.train_data_lenth, resort_lenth=args.remove_numbers, seed=args.seed)
-dataer.set_sequence(sequence=resort_sequence)
+# resort_sequence = get_random_sequence(dataer.train_data_lenth, resort_lenth=args.remove_numbers, seed=args.seed)
+# dataer.set_sequence(sequence=resort_sequence)
+
+
 # neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
 
 # # after pre save model, we could load model
@@ -150,11 +152,12 @@ for remain_head in remove_squence: ##TODO  !!! this remove_batch + 1 need to be 
 
     ## 1) for retrain
     retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
-    spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head, isAdv=True)
-    recorder.metrics_time_record(method='Retrain', time=spending_time)
+    retrain_neter.load_model('FGSM_retrain_model_ten_{}_times{}'.format(remain_head, args.times))
+    # spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head, isAdv=True)
+    # recorder.metrics_time_record(method='Retrain', time=spending_time)
     recorder.metrics_clean_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=False))
     recorder.metrics_perturbed_acc_record('retrain', retrain_neter.test(isTrainset=False, isAttack=True))
-    retrain_neter.save_model(name=generate_save_name(args, remain_head))
+    # retrain_neter.save_model(name=generate_save_name(args, remain_head))
     del retrain_neter
 
     ## 2) for SISA

@@ -1,3 +1,6 @@
+from turtle import distance
+from matplotlib.transforms import Transform
+from pytz import common_timezones
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,7 +10,9 @@ import random
 from TempArgs import args
 import matplotlib.pyplot as plt
 import seaborn as sns
-from matplotlib.pyplot import MultipleLocator
+import copy
+
+from Recorder import Recorder
 
 def paramters_to_vector(params):
 
@@ -139,6 +144,7 @@ def Transform_to_dataframe(dicter, index_sequence, args):
         index: remove_number
         value: eval value
     """
+    prefix = '{}_{}_'.format(args.adv_type, args.isBatchRemove)
     reTrans_dict = {
         'method': [],
         'index': [],
@@ -147,6 +153,8 @@ def Transform_to_dataframe(dicter, index_sequence, args):
 
     for i, dex in enumerate(index_sequence):
         for key, value in dicter.items():
+            if key == prefix + 'retrain':
+                continue
             reTrans_dict['method'].append(Transfrom_string(key, args))
             reTrans_dict['index'].append(dex)
             reTrans_dict['value'].append(value[i])
@@ -209,8 +217,84 @@ def line_plot(df, metrics):
     plt.ylabel(metrics)
     plt.xlabel('Remove Numbers')
 
+    # plt.close()
 
     return ax
+
+def acc_abs(recorder):
+
+    prefix = recorder.prefix
+
+    arr_clean = copy.deepcopy(recorder.clean_acc_dict[prefix + 'retrain'])
+    arr_clean = arr_clean[1 : ]
+    arr_perturbed = copy.deepcopy(recorder.perturbed_acc_dict[prefix + 'retrain'])
+    arr_perturbed = arr_perturbed[1 : ]
+
+    for key, value in recorder.clean_acc_dict.items():
+        if key == prefix + 'retrain':
+            continue
+        recorder.clean_acc_dict[key] = np.abs(arr_clean - value)
+
+    for key, value in recorder.perturbed_acc_dict.items():
+        if key == prefix + 'retrain':
+            continue
+        recorder.perturbed_acc_dict[key] = np.abs(arr_perturbed - value)
+    
+
+def bar_plot(df, metrics):
+
+    # set plot style
+    sns.set_style('darkgrid')
+    plt.figure(figsize=(21, 7))
+    ax = sns.barplot(
+        data=df,
+        x='method',
+        y='value',
+        hue='index',
+    )
+    plt.legend(title='Remove Numbers')
+    plt.xlabel('')
+    plt.xticks(fontsize=16)
+    plt.ylabel(metrics)
+    # plt.ylim(0.0, 0.28)
+    
+    ax.set_ylabel(ax.get_ylabel(), size=16)
+    
+    plt.setp(ax.get_legend().get_texts(), fontsize='16')
+    plt.setp(ax.get_legend().get_title(), fontsize='16')
+
+
+    # plt.close()
+
+    return ax
+
+def Drawing_summary(args, times=[0, 1, 2]):
+
+    remove_sequence_dict = {
+        0: [1, 200, 500, 1000, 2000, 4000],
+        1: [2500, 5000, 7500, 10000],
+    }
+    remove_sequence = remove_sequence_dict[args.isBatchRemove]
+
+    recorder_list = []
+    for i in times:
+        temp = Recorder(args)
+        temp.load(times=i)
+        acc_abs(temp)
+        recorder_list.append(temp)
+
+    disatnce_df_list = [Transform_to_dataframe(recorder.distance_dict, remove_sequence, args) for recorder in recorder_list]
+    clean_acc_df_list = [Transform_to_dataframe(recorder.clean_acc_dict, remove_sequence, args) for recorder in recorder_list]
+    perturbed_acc_df_list = [Transform_to_dataframe(recorder.perturbed_acc_dict, remove_sequence, args) for recorder in recorder_list]
+
+    distance_df = pd.concat(disatnce_df_list, ignore_index=True)
+    clean_acc_df = pd.concat(clean_acc_df_list, ignore_index=True)
+    perturbed_acc_df = pd.concat(perturbed_acc_df_list, ignore_index=True)
+
+    # return bar_plot(clean_acc_df, metrics='Clean Accuracy'), bar_plot(perturbed_acc_df, metrics='Perturbed Accuracy'), line_plot(distance_df, metrics='Distance')
+    return bar_plot(perturbed_acc_df, metrics='Perturbed Accuracy Gap')
+    # return bar_plot(clean_acc_df, metrics='Clean Accuracy Gap')
+    # return line_plot(distance_df, metrics='Distance')
 
 if __name__ == "__main__":
     args = args()
