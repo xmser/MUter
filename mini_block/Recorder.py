@@ -131,8 +131,8 @@ class Recorder:
 
     def load(
         self, 
-        method_list = ['retrain', 'MUter', 'Newton_delta', 'Influence_delta', 'Fisher_delta', 'Newton', 'Influence', 'Fisher'], 
-        time_method_list=['Retrain', 'MUter', 'SISA'],
+        method_list = ['retrain', 'MUter', 'Newton_delta', 'Influence_delta', 'Fisher_delta', 'Newton', 'Influence', 'Fisher', 'FMUter'], 
+        time_method_list=['Retrain', 'MUter', 'SISA', 'FMUter'],
         times=None,
         ):
         

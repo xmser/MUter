@@ -98,7 +98,7 @@ class Manager:
         
         for item in sequence:
             temp = self.find(index=item, isGetSlicesDex=True)
-            self.shards_info[temp[0]]['slices'][temp[1]].remove(item)  # if after the remove, the size become zero, nned to be sign!!!
+            self.shards_info[temp[0]]['slices'][temp[1]].remove(item)  # if after the remove, the size become zero, need to be sign!!!
             self.shards_info[temp[0]]['lenth'] -= 1
 
         print('Remove done !')
@@ -115,6 +115,10 @@ class SISA:
         self.model_list = []
 
         self.basic_path = 'data/SISA/{}'.format(self.dataer.dataset_name)
+        # will be remove
+        if self.args.isBatchRemove == 1:
+            self.basic_path += '_copy'
+
         if os.path.exists(self.basic_path) == False:
             os.makedirs(self.basic_path)
 
@@ -187,7 +191,10 @@ class SISA:
         """
         retrain a shard or sub shards
         """
+        sequence.sort()
+
         sub_epochs = math.ceil((self.args.tuning_epochs * 2) / (self.manager.shards_nums + 1))
+        print('Sub Epochs is {}'.format(sub_epochs))
         retrain_info = self.manager.remove_indexs(sequence=sequence)
 
         print('Retrain following shards and slice ...')
@@ -224,7 +231,8 @@ class SISA:
                     isAdv=isAdv, 
                     verbose=verbose, 
                     isSISA=True, 
-                    SISA_info=train_info
+                    SISA_info=train_info,
+                    isFinaltest=False,
                 )
                 
                 if dex == self.manager.slices_nums - 1:

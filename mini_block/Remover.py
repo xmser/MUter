@@ -10,7 +10,7 @@ where we abstract the remove way as class, the mainly fun here about such:
 7)method: test model (get from neter)
 """
 
-from builtins import print
+from builtins import print, super
 from unittest import result
 from tqdm import tqdm
 from Train import Neter
@@ -368,6 +368,41 @@ class MUterRemover(Remover):
 
         return (end - start)
 
+class FMuterRemover(MUterRemover):
+
+    def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
+        
+        super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
+        self.matrix = self.get_fisher_matrix() - self.get_indirect_hessian(mini_batch=mini_batch)   ## total hessian
+        self.Save_matrix() 
+
+    def Unlearning(self, head, rear, mini_batch=128):
+        start = time.time()
+
+        if self.neter != None:
+            temp = self.neter
+            self.neter = None
+            del temp
+
+        self.neter = Neter(dataer=self.dataer, args=self.args)
+        self.neter.net_copy(self.basic_neter) # deepcopy the basic_net's model parameters, only need to [update_parameters, test] is ok.
+
+        self.Load_matrix()
+        self.matrix -= (self.get_fisher_matrix(head=head, rear=rear) - self.get_indirect_hessian(head=head, rear=rear, mini_batch=mini_batch))
+        if self.grad == None:
+            self.grad = self.get_sum_grad(head=head, rear=rear)
+        else:
+            self.grad += self.get_sum_grad(head=head, rear=rear)
+        self.Save_matrix()
+
+        self.Update_net_parameters()
+
+        end = time.time()
+
+        return (end - start)
+
+
+
 class SchurMUterRemover(MUterRemover):
     """extend from MUter, need his get_indirect_hessian.
 
@@ -592,4 +627,5 @@ class FisherRemover(Remover):
         self.Save_matrix()
 
         self.Update_net_parameters()
-            
+
+

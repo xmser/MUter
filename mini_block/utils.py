@@ -1,3 +1,4 @@
+from builtins import print
 from turtle import distance
 from matplotlib.transforms import Transform
 from pytz import common_timezones
@@ -123,6 +124,7 @@ def Transfrom_string(str, args):
         'Newton',
         'Influence',
         'Fisher',
+        'FMUter',
     ]
 
     for method in method_sequence:
@@ -140,16 +142,18 @@ def Transform_to_dataframe(dicter, index_sequence, args):
         index_sequence: should be a list
         dicter (_type_): {remove_method: [x_1, x_2, x_3,..., x_n-1, x_n]}
         return : df[coloum_1: method, coloum_2: index, coloum_3: value]
-        method: rempve way
+        method: remove way
         index: remove_number
         value: eval value
     """
     prefix = '{}_{}_'.format(args.adv_type, args.isBatchRemove)
+
     reTrans_dict = {
         'method': [],
         'index': [],
         'value': [],
     }
+
 
     for i, dex in enumerate(index_sequence):
         for key, value in dicter.items():
@@ -159,15 +163,17 @@ def Transform_to_dataframe(dicter, index_sequence, args):
             reTrans_dict['index'].append(dex)
             reTrans_dict['value'].append(value[i])
     
+    
     return pd.DataFrame(reTrans_dict)
 
-def get_random_sequence(total_lenth, resort_lenth, seed=None):
+def get_random_sequence(total_lenth, resort_lenth, seed=None, isSort=True):
 
     if seed != None:
         random.seed(seed)
     
     resort_sequence = random.sample(range(0, total_lenth), resort_lenth)
-    resort_sequence.sort()
+    if isSort:
+        resort_sequence.sort()
     another_sequence = [i for i in range(total_lenth) if i not in resort_sequence]
     random_sequence = np.concatenate([resort_sequence, another_sequence])
 
@@ -197,7 +203,7 @@ def generate_save_name(args, remain_head):
 def line_plot(df, metrics):
 
     # set plot style
-    sns.set_style('darkgrid')
+    sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
 
     if metrics == 'distance':
         markers = ['o' for i in range(7)]
@@ -221,6 +227,7 @@ def line_plot(df, metrics):
 
     return ax
 
+
 def acc_abs(recorder):
 
     prefix = recorder.prefix
@@ -241,10 +248,11 @@ def acc_abs(recorder):
         recorder.perturbed_acc_dict[key] = np.abs(arr_perturbed - value)
     
 
+
 def bar_plot(df, metrics):
 
     # set plot style
-    sns.set_style('darkgrid')
+    sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
     plt.figure(figsize=(21, 7))
     ax = sns.barplot(
         data=df,
@@ -256,7 +264,7 @@ def bar_plot(df, metrics):
     plt.xlabel('')
     plt.xticks(fontsize=16)
     plt.ylabel(metrics)
-    # plt.ylim(0.0, 0.28)
+    plt.ylim(0.0, 0.28)
     
     ax.set_ylabel(ax.get_ylabel(), size=16)
     
@@ -267,6 +275,87 @@ def bar_plot(df, metrics):
     # plt.close()
 
     return ax
+
+def Time_summary(args, times=[0, 1, 2]):
+
+    recorder_list = []
+    for i in times:
+        temp = Recorder(args)
+        temp.load(times=i)
+        recorder_list.append(temp)
+    
+    statistics_dict = {}
+    prefix = '{}_{}_'.format(args.adv_type, args.isBatchRemove)
+
+    for recorder in recorder_list:
+        for key, value in recorder.time_dict.items():
+            if key not in statistics_dict:
+                statistics_dict[key] = []
+            if key == prefix + 'Retrain':  
+                statistics_dict[key].append(value[1:])
+            else:
+                statistics_dict[key].append(value)
+
+    result_list = []
+
+    for key, value in statistics_dict.items():
+        result_list.append([sum(e)/len(e) for e in zip(*value)])
+    
+    lenth = len(result_list[0])
+
+    for index in range(lenth):
+        str = ''
+        for item in result_list:
+            str += '&{:.2f} '.format(item[index])
+        str += '&100.00 \\\\'
+        print(str)
+
+
+def Drawing_fisher_muter(args, times=[8, 9, 10]):
+
+    remove_sequence_dict = {
+        0: [1, 200, 500, 1000, 2000, 4000],
+        1: [2500, 5000, 7500, 10000],
+    }
+    remove_sequence = remove_sequence_dict[args.isBatchRemove]
+
+    recorder_list = []
+    for i in times:
+        temp = Recorder(args)
+        temp.load(times=i)
+        recorder_list.append(temp)
+    
+    time_df_list = [Transform_to_dataframe(recorder.time_dict, remove_sequence, args) for recorder in recorder_list]
+
+
+    time_df = pd.concat(time_df_list, ignore_index=True)
+
+    # # set plot style
+    # sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
+
+    markers = ['o' for i in range(2)]
+
+    ax = sns.lineplot(
+        x='index', 
+        y='value', 
+        data=time_df, 
+        hue='method', 
+        style='method',
+        markers=markers,
+        dashes=False,
+        palette=['r', 'blue'],
+        linewidth=2.5,
+    )
+
+    plt.ylabel('Time')
+    plt.xlabel('Remove Numbers')
+    plt.ylim(35, 55)
+
+    # plt.close()
+
+    return ax
+
+
 
 def Drawing_summary(args, times=[0, 1, 2]):
 
@@ -292,8 +381,8 @@ def Drawing_summary(args, times=[0, 1, 2]):
     perturbed_acc_df = pd.concat(perturbed_acc_df_list, ignore_index=True)
 
     # return bar_plot(clean_acc_df, metrics='Clean Accuracy'), bar_plot(perturbed_acc_df, metrics='Perturbed Accuracy'), line_plot(distance_df, metrics='Distance')
-    return bar_plot(perturbed_acc_df, metrics='Perturbed Accuracy Gap')
-    # return bar_plot(clean_acc_df, metrics='Clean Accuracy Gap')
+    # return bar_plot(perturbed_acc_df, metrics='Perturbed Accuracy Gap')
+    return bar_plot(clean_acc_df, metrics='Clean Accuracy Gap')
     # return line_plot(distance_df, metrics='Distance')
 
 if __name__ == "__main__":
