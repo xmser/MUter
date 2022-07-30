@@ -116,7 +116,7 @@ class SISA:
 
         self.basic_path = 'data/SISA/{}'.format(self.dataer.dataset_name)
         # will be remove
-        if self.args.isBatchRemove == 1:
+        if self.args.isBatchRemove == 1 or self.args.isBatchRemove == 2:
             self.basic_path += '_copy'
 
         if os.path.exists(self.basic_path) == False:

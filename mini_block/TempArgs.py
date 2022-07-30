@@ -11,13 +11,13 @@ def args():
     parser.add_argument('--epochs', type=int, default=300, help='custom the training epochs')
     parser.add_argument('--lr', type=float, default=0.1)
     parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
-    parser.add_argument('--times', type=int, default=0, help='do repeat experiments')
+    parser.add_argument('--times', type=int, default=13, help='do repeat experiments')
     parser.add_argument('--gpu_id', default=1, type=int)
     parser.add_argument('--ngpu', default=1, type=int)
 
     # for remove type chose
     parser.add_argument('--adv_type', type=str, default='PGD', help='the adv training type')
-    parser.add_argument('--isBatchRemove', type=int, default=1, help='0: no batch, Schur complement. 1: batch, Neumann')
+    parser.add_argument('--isBatchRemove', type=int, default=2, help='0: no batch, Schur complement. 1: batch, Neumann')
 
     # for pretrain type
     parser.add_argument('--isPretrain', default=True, type=bool)

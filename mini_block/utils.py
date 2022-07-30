@@ -310,6 +310,47 @@ def Time_summary(args, times=[0, 1, 2]):
         str += '&100.00 \\\\'
         print(str)
 
+def Drawing_extension_time(args, times=[11, 12, 13]):
+
+    prefix = '{}_{}_'.format(args.adv_type, args.isBatchRemove)
+    sets = []
+    sisa_name = ['SISA_shards5', 'SISA_shards10', 'SISA_shards20', 'SISA-DK_shards5', 'SISA-DK_shards10', 'SISA-DK_shards20', ]
+
+    for time in times:
+        temp = Recorder(args)
+        time_method_list_1 = ['SISA_shards5_{}'.format(i*500) for i in range(1, 7)]
+        # time_method_list_2 = ['SISA_shards10_{}'.format(i*500) for i in range(1, 7)]
+        # time_method_list_3 = ['SISA_shards20_{}'.format(i*500) for i in range(1, 7)]
+
+        time_method_list_4 = ['SISA-DK_shards5_{}'.format(i*500) for i in range(1, 7)]
+        time_method_list_5 = ['SISA-DK_shards10_{}'.format(i*500) for i in range(1, 7)]
+        time_method_list_6 = ['SISA-DK_shards20_{}'.format(i*500) for i in range(1, 7)]
+
+        tupler = (time_method_list_1, 
+                # time_method_list_2,
+                # time_method_list_3,
+                time_method_list_4,
+                time_method_list_5,
+                time_method_list_6,
+                )
+
+        arr = np.concatenate(tupler)
+        temp.load(time_method_list=arr, times=time)
+
+        dicter = {
+            'method': [],
+            'index': [],
+            'value': [],
+        }
+
+        for method, lister in zip(sisa_name, tupler):
+            for index, key in enumerate(lister):
+                dicter['method'].append(method)
+                dicter['index'].append((index + 1) * 500)
+                dicter['value'].append(temp.time_dict[prefix + key][0])
+        sets.append(dicter)
+    print(sets)
+
 
 def Drawing_fisher_muter(args, times=[8, 9, 10]):
 

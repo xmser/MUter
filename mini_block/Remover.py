@@ -208,8 +208,8 @@ class MUterRemover(Remover):
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-        self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)   ## total hessian
-        self.Save_matrix()
+        # self.matrix = self.get_pure_hessian() - self.get_indirect_hessian(mini_batch=mini_batch)   ## total hessian
+        # self.Save_matrix()
 
     def get_indirect_hessian(self, head=-1, rear=-1, mini_batch=128, block_wise_size=20):
         """
@@ -373,8 +373,8 @@ class FMuterRemover(MUterRemover):
     def __init__(self, basic_neter, dataer, isDelta, remove_method, args, mini_batch=128):
         
         super(MUterRemover, self).__init__(basic_neter, dataer, isDelta, remove_method, args)
-        self.matrix = self.get_fisher_matrix() - self.get_indirect_hessian(mini_batch=mini_batch)   ## total hessian
-        self.Save_matrix() 
+        # self.matrix = self.get_fisher_matrix() - self.get_indirect_hessian(mini_batch=mini_batch)   ## total hessian
+        # self.Save_matrix() 
 
     def Unlearning(self, head, rear, mini_batch=128):
         start = time.time()

@@ -27,7 +27,7 @@ parser.add_argument('--device', type=int, default=0, help='the cuda device numbe
 parser.add_argument('--epochs', type=int, default=300, help='custom the training epochs')
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batchsize', type=int, default=128, help='the traning batch size')
-parser.add_argument('--times', type=int, default=10, help='do repeat experiments')
+parser.add_argument('--times', type=int, default=11, help='do repeat experiments')
 parser.add_argument('--gpu_id', default=3, type=int)
 parser.add_argument('--ngpu', default=1, type=int)
 
@@ -49,6 +49,9 @@ parser.add_argument('--isBias', default=False, type=bool)
 
 # for repeat experiments
 parser.add_argument('--seed', default=998, type=int, help='determate the remove data id')
+
+parser.add_argument('--shards', default=5, type=int)
+parser.add_argument('--isDK', default=0, type=int, help='0: no, 1: yes.')
 
 args = parser.parse_args()
 
@@ -89,7 +92,11 @@ if args.isPretrain:
 #####
 
 dataer = Dataer(dataset_name=args.dataset)
-# resort_sequence = get_random_sequence(dataer.train_data_lenth, resort_lenth=args.remove_numbers, seed=args.seed, isSort=True)
+if args.isDK == 0:
+    resort_sequence = get_random_sequence(dataer.train_data_lenth, resort_lenth=args.remove_numbers, seed=args.seed, isSort=False)
+else:
+    resort_sequence = get_random_sequence(dataer.train_data_lenth, resort_lenth=args.remove_numbers, seed=args.seed, isSort=True)
+
 # dataer.set_sequence(sequence=resort_sequence)
 
 neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
@@ -107,7 +114,7 @@ neter.load_model('final_retrain_model_ten_0_times0')
 
 # neter.initialization(isCover=True)  # init generate the adv samples, inner output files.
 
-# sisaer = SISA(dataer=dataer, args=args, shards_num=5, slices_num=5)
+# sisaer = SISA(dataer=dataer, args=args, shards_num=args.shards, slices_num=5)
 # sisaer.Reload()
 # sisaer.sisa_train(isAdv=True)
 # sisaer.sisa_remove(sequence=[17211, ], isTrain=True, isAdv=True)
@@ -130,7 +137,7 @@ neter.load_model('final_retrain_model_ten_0_times0')
 # # ########
 # # ### stage 2) pre calculate the matrix, store and load
 # # ########
-if args.isBatchRemove == 1:
+if args.isBatchRemove == 1 or args.isBatchRemove == 2:
     muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
 else:
     muter = SchurMUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
@@ -158,12 +165,12 @@ for index, remain_head in enumerate(remove_squence):
     print('Unlearning deomain [{} -- {})'.format(remove_head, remain_head))
 
     # ## 1) for retrain
-    retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
+    # retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
     # spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head)
     # retrain_neter.load_model('final_retrain_model_ten_{}_times{}'.format(remain_head, args.times))
     
     # for extension expertiment
-    retrain_neter.load_model('final_retrain_model_ten_{}_times0'.format(remain_head))
+    # retrain_neter.load_model('final_retrain_model_ten_{}_times0'.format(remain_head))
 
     # recorder.metrics_time_record(method='Retrain', time=spending_time)
 
@@ -177,18 +184,21 @@ for index, remain_head in enumerate(remove_squence):
     # sisaer.sisa_remove(sequence=resort_sequence[remove_head : remain_head ], isTrain=True, isAdv=True)
     # end_time = time.time()
 
-    # recorder.metrics_time_record(method='SISA', time=(end_time - start_time))
+    # str = 'SISA'
+    # if args.isDK == 1:
+    #     str = 'SISA-DK'
+    # recorder.metrics_time_record(method=str+'_shards{}_{}'.format(args.shards, args.remove_batch), time=(end_time - start_time))
 
     # 3) for MUter
     unlearning_time = muter.Unlearning(head=remove_head, rear=remain_head)
 
-    recorder.metrics_time_record(method=muter.remove_method, time=unlearning_time)
+    recorder.metrics_time_record(method=muter.remove_method+'{}'.format(remain_head), time=unlearning_time)
     # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=muter)
 
     # 3.1) for Fisher-MUter
     fmuter_unlearning_time = fmuter.Unlearning(head=remove_head, rear=remain_head)
 
-    recorder.metrics_time_record(method=fmuter.remove_method, time=fmuter_unlearning_time)
+    recorder.metrics_time_record(method=fmuter.remove_method+'{}'.format(remain_head), time=fmuter_unlearning_time)
     # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=fmuter)
 
     # # ## 4) for Newton_delta, Newton
