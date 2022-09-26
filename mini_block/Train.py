@@ -1,14 +1,18 @@
+from builtins import print
 from ntpath import join
 import os
 import torch
 import torch.nn as nn
 from model.common_model import *
 from model.wrn import WideResNet
+from model.preactresnet import PreActResNet18
+from model.resnet import ResNet18
 from tqdm import tqdm
 import numpy as np
 import copy
 import time
 from torchattacks import FGSM, PGD
+from utils import get_layers, DataPreProcess
 
 class Neter:
 
@@ -34,16 +38,25 @@ class Neter:
         self.net = None
         self.isTuning = isTuning
         self.pretrain_param = pretrain_param
+        self.dataPreprocess = DataPreProcess(self.args)
         self.default_path = './data'
         self.inner_output = []
         self.atk_info = {
             'Cifar10': (8/255, 2/255, 10),
             'Mnist': (2/255, 0.4/255, 20),
+            'SVHN': (4/255, 2/255, 10),
+            'Cifar100': (8/255, 2/255, 10),
+            'ImageNet': (8/255, 2/255, 10),
+            'Lacuna-100': (8/255, 2/255, 10),
         }
         if self.args.adv_type == 'FGSM':
             self.atk_info = {
                 'Cifar10': (8/255, 8/255, 1),
                 'MNist': (2/255, 2/255, 1),
+                'SVHN': (4/255, 4/255, 1),
+                'Cifar100': (8/255, 8/255, 1),
+                'ImageNet': (8/255, 8/255, 1),
+                'Lacuna-100': (8/255, 8/255, 1),
             }
 
         if self.isTuning == False:
@@ -56,26 +69,40 @@ class Neter:
                     self.net = vgg16().to(self.device)
                 else:
                     raise Exception('No such arch called {} !'.format(arch))
+            elif dataer.dataset_name == 'Cifar100':
+                self.net = WideResNet(28, 100, 10, 0)
+            elif dataer.dataset_name == 'Lacuna-100':
+                self.net = WideResNet(28, 100, 10, 0)
             else:
                 raise Exception('No suchh dataset called {}'.format(dataer.dataset_name))
-        else: # using pre train model
+
+            if args.ngpu > 0:
+                self.net = torch.nn.DataParallel(self.net, device_ids=list(range(args.ngpu)))
+
+        else: 
+            # using pre train model
             if self.pretrain_param == None:
                 raise Exception('Not get the pretrain infom !')
             if os.path.exists(self.pretrain_param['root_path']) == False:
                 raise Exception('No such path for get the pretrain model in {}!'.format(self.pretrain_param['root_path']))
 
-            self.net = WideResNet(self.pretrain_param['layers'], 1000, self.pretrain_param['widen_factor'], dropRate=self.pretrain_param['droprate'])
+            if args.dataset == 'ImageNet':
+                self.net = WideResNet(self.pretrain_param['layers'], 1000, self.pretrain_param['widen_factor'], dropRate=self.pretrain_param['droprate'])
+            elif args.dataset in ['Cifar100', 'Lacuna-100']:
+                # self.net = PreActResNet18(num_classes=100)
+                self.net = WideResNet(self.pretrain_param['layers'], 100, self.pretrain_param['widen_factor'], dropRate=self.pretrain_param['droprate'])
+
             if args.ngpu > 0:
                 self.net = torch.nn.DataParallel(self.net, device_ids=list(range(args.ngpu)))
             self.net.load_state_dict(torch.load(self.pretrain_param['root_path']))
+
             print('Pretrain model successfully load ({})!'.format(self.pretrain_param['root_path']))
-            
-            ## freezing the pre layer
+            # freezing the pre layer
             for param in self.net.parameters():
                 param.requires_grad = False
             self.net.module.fc = self.pretrain_param['new_last_layer'] # new_last_layer may be linear or MLP
 
-            self.net = self.net.to(self.device)
+        self.net = self.net.to(self.device)
 
     def net_copy(self, basic_neter):
         
@@ -84,7 +111,20 @@ class Neter:
         self.args = basic_neter.args
 
 
-    def training(self, epochs=100, lr=0.001, batch_size=128, isAdv=False, verbose=False, head=-1, rear=-1, isSave=False, isSISA=False, SISA_info=None, isFinaltest=True):
+    def training(
+        self, 
+        epochs=100, 
+        lr=0.001, 
+        batch_size=128, 
+        isAdv=False, 
+        verbose=False, 
+        head=-1, 
+        rear=-1, 
+        isSave=False, 
+        isSISA=False, 
+        SISA_info=None, 
+        isFinaltest=False,
+        ):
 
         # for training, learning from the way in 'using Pre-Training can improve model rebustness and uncertainly', using y=2x-1, $x \in [0, 1]$ into $y \in [-1, 1]$, changing the domain
 
@@ -98,9 +138,9 @@ class Neter:
         if isAdv:
             self.isAdv = True
             # here the PGD source code have been modified, we use adv_image * 2 - 1 replace the adv_image.
-            atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
+            atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2], data_process=self.dataPreprocess)
 
-        optimizer = torch.optim.SGD(self.net.parameters(), lr=lr)
+        optimizer = torch.optim.SGD(self.net.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
 
         ## for fine_tuing model
         if self.isTuning:
@@ -111,7 +151,9 @@ class Neter:
         start_time = time.time()
         for epoch in range(1, epochs+1):
 
-            self.update(optimizer=optimizer, epoch=epoch, isClose=(isSISA or self.isTuning))
+            # self.update(optimizer=optimizer, epoch=epoch, isClose=(isSISA or self.isTuning))
+            if epoch == 11 or epoch == 120:
+                optimizer.param_groups[0]['lr'] *= 0.1
 
             lenth = len(train_loader)
             avg_loss = 0.0
@@ -125,7 +167,8 @@ class Neter:
                     if isAdv:
                         image = atk(image, label).to(self.device)
 
-                    output = self.net(image * 2 - 1)  # map domain from [0, 1] into [-1, 1]
+                    # output = self.net(image * 2 - 1)  # map domain from [0, 1] into [-1, 1]
+                    output = self.net(self.dataPreprocess.processing(image))
 
                     loss = self.criterion(output, label)
                     avg_loss += loss.item()
@@ -139,10 +182,11 @@ class Neter:
                     steps += 1
 
             if epoch % 10 == 0 and isFinaltest == False:
-                print('Train acc: {:.2f}%'.format(self.test(isTrainset=True) * 100), end='  ')
+                print('Train acc: {:.2f}%'.format(self.test(isTrainset=True) * 100))
                 print('Test acc: {:.2f}%'.format(self.test(isTrainset=False) * 100))
-                print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True)*100), end='  ')
+                print('Adv Train test acc: {:.2f}%'.format(self.test(isTrainset=True, isAttack=True)*100))
                 print('Adv Test acc: {:.2f}%'.format(self.test(isTrainset=False, isAttack=True)*100))
+                # torch.save(self.net.state_dict(), f='Lacuna-100_wrn28_model_epoch{}'.format(epoch))
         
         end_time = time.time()
 
@@ -171,7 +215,7 @@ class Neter:
             loader = self_loader
 
         if isAttack:
-            atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
+            atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2], data_process=self.dataPreprocess)
 
         total = 0
         correct = 0
@@ -183,7 +227,9 @@ class Neter:
             if isAttack:
                 image = atk(image, label).to(self.device)
 
-            output = self.net(image * 2 - 1)
+            # output = self.net(image * 2 - 1)
+            output = self.net(self.dataPreprocess.processing(image))
+
             _, pred = torch.max(output.data, 1)
             total += image.shape[0]
             correct += (pred == label).sum()
@@ -196,7 +242,7 @@ class Neter:
         loader = self.dataer.get_loader(batch_size=batch_size, isTrain=isTrain)
         
         if isAttack:
-            atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
+            atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2], data_process=self.dataPreprocess)
 
         arr = []
         self.net.eval()
@@ -207,7 +253,9 @@ class Neter:
             if isAttack:
                 image = atk(image, label).to(self.device)
 
-            output = self.net(image * 2 - 1)
+            # output = self.net(image * 2 - 1)
+            output = self.net(self.dataPreprocess.processing(image))
+
             _, pred = torch.max(output.data, 1)
             arr.append(pred)
         self.net.train()
@@ -237,7 +285,7 @@ class Neter:
 
     def save_adv_sample(self, batch_size=128, isTrain=True, isCover=False):
         
-        atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2])
+        atk = PGD(self.net, self.atk_info[self.args.dataset][0], self.atk_info[self.args.dataset][1], self.atk_info[self.args.dataset][2], data_process=self.dataPreprocess)
         path = os.path.join(self.default_path, '{}'.format(self.args.dataset))
         if os.path.exists(path) == False:
             os.makedirs(path)
@@ -318,7 +366,8 @@ class Neter:
         for (image, label) in tqdm(loader):
             image = image.to(self.device)
             label = label.to(self.device)
-            output = self.net(image * 2 - 1)            
+            # output = self.net(image * 2 - 1)            
+            output = self.net(self.dataPreprocess.processing(image))
             label_list.append(label)
             _, pred = torch.max(output.data, 1)
             total += image.shape[0]

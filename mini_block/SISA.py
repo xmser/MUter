@@ -5,7 +5,7 @@ import math
 import numpy as np
 import os
 from functorch import vmap
-from utils import get_layers
+from utils import get_layers, get_pretrain_model_path
 
 
 # TODO After the remove ,the size become zero, need to be pay attention~
@@ -115,9 +115,6 @@ class SISA:
         self.model_list = []
 
         self.basic_path = 'data/SISA/{}'.format(self.dataer.dataset_name)
-        # will be remove
-        if self.args.isBatchRemove == 1 or self.args.isBatchRemove == 2:
-            self.basic_path += '_copy'
 
         if os.path.exists(self.basic_path) == False:
             os.makedirs(self.basic_path)
@@ -133,7 +130,7 @@ class SISA:
                     'layers': self.args.layers,
                     'widen_factor': self.args.widen_factor,
                     'droprate': self.args.droprate,
-                    'root_path': self.args.pretrain_path + '{}'.format(self.args.pretrain_model_number) + '.pt',
+                    'root_path': get_pretrain_model_path(self.args.dataset),
                     'new_last_layer': get_layers(self.args.tuning_layer, isBias=self.args.isBias),
                 }
 
@@ -158,7 +155,7 @@ class SISA:
                     'layers': self.args.layers,
                     'widen_factor': self.args.widen_factor,
                     'droprate': self.args.droprate,
-                    'root_path': self.args.pretrain_path + '{}'.format(self.args.pretrain_model_number) + '.pt',
+                    'root_path': get_pretrain_model_path(self.args.dataset),
                     'epochs': sub_epochs,
                     'lr': self.args.tuning_lr,
                     'new_last_layer': get_layers(self.args.tuning_layer, isBias=self.args.isBias),
@@ -207,7 +204,7 @@ class SISA:
                     'layers': self.args.layers,
                     'widen_factor': self.args.widen_factor,
                     'droprate': self.args.droprate,
-                    'root_path': self.args.pretrain_path + '{}'.format(self.args.pretrain_model_number) + '.pt',
+                    'root_path': get_pretrain_model_path(self.args.dataset),
                     'epochs': sub_epochs,
                     'lr': self.args.tuning_lr,
                     'new_last_layer': get_layers(self.args.tuning_layer, isBias=self.args.isBias),

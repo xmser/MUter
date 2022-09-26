@@ -1,13 +1,14 @@
 import os
 import torch
 import torchvision
+import random
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data.sampler import Sampler
 from utils import get_random_sequence
+from torchvision.datasets import DatasetFolder
+from typing import Any, Callable, Optional, Tuple
 
-
-# TODO : the classtype loader for inner_output is not done !!!
 
 class SelfSampler(Sampler):
 
@@ -68,22 +69,45 @@ class CustomSampler(Sampler):
 
         return len(self.indices)
 
+class LacunaImageFoloder(torchvision.datasets.ImageFolder):
 
+    def __init__(
+        self, 
+        root: str, 
+        transform: Optional[Callable] = None, 
+        target_transform: Optional[Callable] = None, 
+    ):
+        super().__init__(root, transform, target_transform)
+        
+        self.dataset_lenth = len(self.samples)
+        self.samples_index_list = [i for i in range(self.dataset_lenth)]
+        random.seed(666)
+        random.shuffle(self.samples_index_list)
+    
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        
+        path, target = self.samples[self.samples_index_list[index]]
+        sample = self.loader(path)
+        if self.transform is not None:
+            sample = self.transform(sample)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
 
+        return sample, target      
 
 class Dataer:
 
-    def __init__(self, dataset_name, sequence=[]):
+    def __init__(self, dataset_name, sequence=[], dataset='Cifar10'):
         
         self.dataset_name = dataset_name
         self.default_path = './data'
-        if dataset_name == 'Mnist':
+        if dataset == 'Mnist':
             transform = transforms.Compose([transforms.ToTensor(), ])
             self.datasets = [
                 torchvision.datasets.MNIST(root='./data/mnist', train=True, transform=transform, download=True),
                 torchvision.datasets.MNIST(root='./data/mnist', train=False, transform=transform, download=True)
             ]
-        elif dataset_name == 'Cifar10':
+        elif dataset == 'Cifar10':
             transform_train = transforms.Compose([
                 transforms.RandomCrop(32, padding=4),  #先四周填充0，在吧图像随机裁剪成32*32
                 transforms.RandomHorizontalFlip(),  #图像一半的概率翻转，一半的概率不翻转
@@ -99,12 +123,73 @@ class Dataer:
                 torchvision.datasets.CIFAR10(root='./data/cifar-10-python', train=True, download=True, transform=transform_train), #训练数据集
                 torchvision.datasets.CIFAR10(root='./data/cifar-10-python', train=False, download=True, transform=transform_test)
             ]
+        elif dataset == 'SVHN':
+            transform_train = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+            ])
+
+            transform_test = transforms.Compose([
+                transforms.ToTensor(),
+            ])
+            self.datasets = [
+                torchvision.datasets.SVHN(root='./data/svhn-10-python', split='train', download=True, transform=transform_train),
+                torchvision.datasets.SVHN(root='./data/svhn-10-python', split='test', download=True, transform=transform_test),
+                torchvision.datasets.SVHN(root='./data/svhn-10-python', split='extra', download=True, transform=transform_train),
+            ]
+        elif dataset == 'Cifar100':
+            transform_train = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                # transforms.RandomRotation(15),
+                transforms.ToTensor(),
+            ])
+            transform_test = transforms.Compose([
+                transforms.ToTensor(),
+            ])
+            self.datasets = [
+                torchvision.datasets.CIFAR100(root='./data/cifar-100-python', train=True, download=True, transform=transform_train),
+                torchvision.datasets.CIFAR100(root='./data/cifar-100-python', train=False, download=True, transform=transform_test),
+            ]
+        elif dataset == 'Lacuna-100':
+            transform_train = transforms.Compose([
+                transforms.Resize(size=(32, 32)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+            ])
+            transform_test = transforms.Compose([
+                transforms.Resize(size=(32, 32)),
+                transforms.ToTensor(),
+            ])
+            self.datasets = [
+                LacunaImageFoloder(root='./data/Lacuna-100-python/train', transform=transform_train),
+                LacunaImageFoloder(root='./data/Lacuna-100-python/test', transform=transform_test),
+            ]
+        elif dataset == 'Lacuna-10':
+            transform_train = transforms.Compose([
+                transforms.Resize(size=(32, 32)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+            ])
+            transform_test = transforms.Compose([
+                transforms.Resize(size=(32, 32)),
+                transforms.ToTensor(),
+            ])
+            self.datasets = [
+                LacunaImageFoloder(root='./data/Lacuna-10-python/train', transform=transform_train),
+                LacunaImageFoloder(root='./data/Lacuna-10-python/test', transform=transform_test),
+            ]
         else:
             raise Exception('No such dataset called {}'.format(dataset_name))
         
         self.class_num = {
             'Cifar10': 10,
             'Mnist': 10,
+            'SVHN': 10,
+            'Cifar100': 100,
+            'Lacuna-100': 100,
+            'Lacuna-10': 10,
         }
 
         self.train_data_lenth = int(len(self.datasets[0]))
@@ -137,16 +222,16 @@ class Dataer:
                 if isAdv == False:
                     if head == -1 and rear == -1:    
                         if isTrain:
-                            return DataLoader(self.datasets[0], batch_size=batch_size)
+                            return DataLoader(self.datasets[0], batch_size=batch_size, num_workers=2)
                         else:
-                            return DataLoader(self.datasets[1], batch_size=batch_size)
+                            return DataLoader(self.datasets[1], batch_size=batch_size, num_workers=2)
                     else:
                         if isTrain:
                             self_sampler = SelfSampler(self.datasets[0], head=head, rear=rear, sequence=self.sequence)
-                            return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
+                            return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler, num_workers=2)
                         else:
                             self_sampler = SelfSampler(self.datasets[1], head=head, rear=rear, sequence=self.sequence)
-                            return DataLoader(self.datasets[0], batch_size=batch_size, sampler=self_sampler)
+                            return DataLoader(self.datasets[1], batch_size=batch_size, sampler=self_sampler, num_workers=2)
                 else:
                     adv_data = self.get_adv_samples(isTrain=isTrain)
                     if head == -1 and rear == -1:    
@@ -267,18 +352,17 @@ class Dataer:
     
 
 if __name__ == "__main__":
-    os.environ['CUDA_VISIBLE_DEVICES'] = '2'
-    dataer = Dataer(dataset_name='Cifar10')
+    os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+    dataer = Dataer(dataset_name='Lacuna-100', dataset='Lacuna-10')
     
-    sequence = get_random_sequence(dataer.train_data_lenth, 10, seed=666)
-    dataer.set_sequence(sequence=sequence)
-    train_loader = dataer.get_loader(batch_size=1, isTrain=True, rear=100)
+    # sequence = get_random_sequence(dataer.train_data_lenth, 10, seed=666)
+    # dataer.set_sequence(sequence=sequence)
+    train_loader = dataer.get_loader(batch_size=128, isTrain=False, head=0)
 
+    total_number = 0
 
     for index, (image, label) in enumerate(train_loader):
-        print(label)
-        if index == 20:
-            break
 
-
-
+        total_number += image.shape[0]
+    
+    print(total_number)

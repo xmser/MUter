@@ -1,7 +1,7 @@
-from builtins import print
-from turtle import distance
+import os
+from sys import stderr
+from builtins import ValueError
 from matplotlib.transforms import Transform
-from pytz import common_timezones
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,7 +12,6 @@ from TempArgs import args
 import matplotlib.pyplot as plt
 import seaborn as sns
 import copy
-
 from Recorder import Recorder
 
 def paramters_to_vector(params):
@@ -42,6 +41,22 @@ def total_param(model):
 
     return number
 
+class DataPreProcess:
+
+    def __init__(self, args):
+        
+        self.args = args
+    
+    def processing(self, image):
+
+        if self.args.dataset == 'Cifar100':
+            # return (image - self.mu) / self.std
+            return image * 2 - 1
+        elif self.args.dataset == 'ImageNet':
+            return image * 2 - 1
+        elif self.args.dataset == 'Lacuna-100':
+            return image 
+            
 def get_layers(str, input_features=640, output_features=10, isBias=False):
 
     if str == 'linear':
@@ -55,8 +70,7 @@ def get_layers(str, input_features=640, output_features=10, isBias=False):
     else:
         raise Exception('No such method called {}, please recheck !'.format(str))
 
-
-def cg_solve(f_Ax, b, cg_iters=20, callback=None, verbose=False, residual_tol=1e-5, x_init=None):
+def cg_solve(f_Ax, b, cg_iters=10, callback=None, verbose=False, residual_tol=1e-5, x_init=None):
     """
     Goal: Solve Ax=b equivalent to minimizing f(x) = 1/2 x^T A x - x^T b
     Assumption: A is PSD, no damping term is used here (must be damped externally in f_Ax)
@@ -125,6 +139,7 @@ def Transfrom_string(str, args):
         'Influence',
         'Fisher',
         'FMUter',
+        'retrain',
     ]
 
     for method in method_sequence:
@@ -135,7 +150,7 @@ def Transfrom_string(str, args):
     print('No match method !')
     return str
 
-def Transform_to_dataframe(dicter, index_sequence, args):
+def Transform_to_dataframe(dicter, index_sequence, args, isIgnoreRetrain=True):
     """transform the dicter type into dataframe for plot pic.
 
     Args:
@@ -157,7 +172,7 @@ def Transform_to_dataframe(dicter, index_sequence, args):
 
     for i, dex in enumerate(index_sequence):
         for key, value in dicter.items():
-            if key == prefix + 'retrain':
+            if key == prefix + 'retrain' and isIgnoreRetrain == True:
                 continue
             reTrans_dict['method'].append(Transfrom_string(key, args))
             reTrans_dict['index'].append(dex)
@@ -182,6 +197,47 @@ def get_random_sequence(total_lenth, resort_lenth, seed=None, isSort=True):
     
     return list(random_sequence)
 
+def get_BatchRemove_sequence(args, isPretrain=False):
+
+    def Add_pre_zero(isPretrain, arr):
+        if isPretrain:
+            arr.insert(0, 0)
+        return arr
+
+    if args.isBatchRemove == 0:
+        if args.dataset in ['ImageNet', 'Cifar100', 'Cifar10']:
+            return Add_pre_zero(isPretrain, [1, 200, 500, 1000, 2000, 4000])
+        elif args.dataset == 'Lacuna-100':
+            return Add_pre_zero(isPretrain, [1, 20, 50, 100, 200, 400])
+        else:
+            raise ValueError
+    elif args.isBatchRemove == 1:
+        if args.dataset in ['ImageNet', 'Cifar100', 'Cifar10']:
+            return Add_pre_zero(isPretrain, [2500, 5000, 7500, 10000])
+        elif args.dataset == 'Lacuna-100':
+            return Add_pre_zero(isPretrain, [220, 440, 660, 880])
+        else:
+            raise ValueError
+
+def get_pretrain_model_path(str):
+
+    if str == 'ImageNet':
+        return 'data/model/pretrain_model/imagenet_wrn_baseline_epoch_99.pt'
+    elif str == 'Cifar100':
+        return 'data/model/pretrain_model/cifar100_wrn34_model_epoch_80.pt'
+    elif str == 'Lacuna-100':
+        return 'data/model/pretrain_model/Lacuna-100_wrn28_model_epoch80.pt'
+    else:
+        raise ValueError
+
+def get_goal_dataset(str):
+     
+    if str in ['ImageNet', 'Cifar100']:
+        return 'Cifar10'
+    elif str == 'Lacuna-100':
+        return 'Lacuna-10'
+    else:
+        raise ValueError
 
 def generate_save_name(args, remain_head):
     str = ''
@@ -208,7 +264,7 @@ def line_plot(df, metrics):
     if metrics == 'distance':
         markers = ['o' for i in range(7)]
     else:
-        markers = ['o' for i in range(7)]
+        markers = ['o' for i in range(8)]
 
     ax = sns.lineplot(
         x='index', 
@@ -218,53 +274,43 @@ def line_plot(df, metrics):
         style='method',
         markers=markers,
         dashes=False,
+        ci=None,
     )
 
     plt.ylabel(metrics)
     plt.xlabel('Remove Numbers')
 
-    # plt.close()
+    plt.close()
 
     return ax
 
-
-def acc_abs(recorder):
-
+def trans_retrain(recorder):
     prefix = recorder.prefix
-
-    arr_clean = copy.deepcopy(recorder.clean_acc_dict[prefix + 'retrain'])
-    arr_clean = arr_clean[1 : ]
-    arr_perturbed = copy.deepcopy(recorder.perturbed_acc_dict[prefix + 'retrain'])
-    arr_perturbed = arr_perturbed[1 : ]
-
-    for key, value in recorder.clean_acc_dict.items():
-        if key == prefix + 'retrain':
-            continue
-        recorder.clean_acc_dict[key] = np.abs(arr_clean - value)
-
-    for key, value in recorder.perturbed_acc_dict.items():
-        if key == prefix + 'retrain':
-            continue
-        recorder.perturbed_acc_dict[key] = np.abs(arr_perturbed - value)
-    
-
+    recorder.clean_acc_dict[prefix + 'retrain'] = recorder.clean_acc_dict[prefix + 'retrain'][1:]
+    recorder.perturbed_acc_dict[prefix + 'retrain'] = recorder.perturbed_acc_dict[prefix + 'retrain'][1: ]
 
 def bar_plot(df, metrics):
 
     # set plot style
     sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
-    plt.figure(figsize=(21, 7))
-    ax = sns.barplot(
+    # plt.figure(figsize=(21, 7))
+    # ax = sns.barplot(
+    #     data=df,
+    #     x='index',
+    #     y='value',
+    #     hue='method',
+    # )
+    ax = sns.lineplot(
         data=df,
-        x='method',
+        x='index',
         y='value',
-        hue='index',
+        hue='method'
     )
     plt.legend(title='Remove Numbers')
     plt.xlabel('')
     plt.xticks(fontsize=16)
     plt.ylabel(metrics)
-    plt.ylim(0.0, 0.28)
+    # plt.ylim(0.0, 0.2)
     
     ax.set_ylabel(ax.get_ylabel(), size=16)
     
@@ -272,7 +318,7 @@ def bar_plot(df, metrics):
     plt.setp(ax.get_legend().get_title(), fontsize='16')
 
 
-    # plt.close()
+    plt.close()
 
     return ax
 
@@ -351,7 +397,6 @@ def Drawing_extension_time(args, times=[11, 12, 13]):
         sets.append(dicter)
     print(sets)
 
-
 def Drawing_fisher_muter(args, times=[8, 9, 10]):
 
     remove_sequence_dict = {
@@ -396,8 +441,6 @@ def Drawing_fisher_muter(args, times=[8, 9, 10]):
 
     return ax
 
-
-
 def Drawing_summary(args, times=[0, 1, 2]):
 
     remove_sequence_dict = {
@@ -426,6 +469,128 @@ def Drawing_summary(args, times=[0, 1, 2]):
     return bar_plot(clean_acc_df, metrics='Clean Accuracy Gap')
     # return line_plot(distance_df, metrics='Distance')
 
+def convert_df_save(
+    args, 
+    times=[0, 1, 2],
+):
+    """
+    the sort order is FGSM(isBatch0, isBatch1), PGD(isBatch0, isBatch1)
+    """
+    recorder_list = []
+    for index in range(len(times)):
+        temp_recorder = Recorder(args)
+        temp_recorder.load(times=times[index])
+        trans_retrain(temp_recorder)   ## retrain record the remain head zero, need to be remove.
+        recorder_list.append(temp_recorder)
+
+    distance_df_list = [
+        Transform_to_dataframe(recorder.distance_dict, get_BatchRemove_sequence(args, False), args, isIgnoreRetrain=True) for recorder in recorder_list
+    ]
+    clean_acc_df_list = [
+        Transform_to_dataframe(recorder.clean_acc_dict, get_BatchRemove_sequence(args, False), args, isIgnoreRetrain=False) for recorder in recorder_list
+    ]
+    perturbed_acc_df_list = [
+        Transform_to_dataframe(recorder.perturbed_acc_dict, get_BatchRemove_sequence(args, False), args, isIgnoreRetrain=False) for recorder in recorder_list
+    ]
+
+    df_distance = pd.concat(distance_df_list, ignore_index=True)
+    df_clean_acc = pd.concat(clean_acc_df_list, ignore_index=True)
+    df_perturbed_acc = pd.concat(perturbed_acc_df_list, ignore_index=True)
+
+    path = 'record/{}/Dfdata'.format(args.dataset)
+    if os.path.exists(path) == False:
+        os.mkdir(path)
+    prefix = '{}_{}_'.format(args.adv_type, args.isBatchRemove)
+
+    df_distance.to_csv(os.path.join(path, prefix + 'distance.csv'))
+    df_clean_acc.to_csv(os.path.join(path, prefix + 'clean_acc.csv'))
+    df_perturbed_acc.to_csv(os.path.join(path, prefix + 'perturbed_acc.csv'))
+    print('Save Done !')
+
+def FigPlot(
+    metrics, 
+    datasets_list=['Cifar10', 'Cifar100', 'Lacuna-100'],
+):
+    """
+    one row include FGSM(isBatchRemove 0, isBatchRemove 1), PGD(isBatchRemove 0, isBatchRemove 1). 
+    """
+
+    fig = plt.figure(figsize=(24, len(datasets_list) * 4))
+    sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
+    adv_type_list = ['FGSM', 'PGD']
+    isBatchRemove_list = [0, 1]
+
+    for index in range(len(datasets_list) * 4):
+
+        ax = plt.subplot(len(datasets_list), 4, index + 1)
+        
+        dataset = datasets_list[index // 4]
+        path = 'record/{}/Dfdata'.format(dataset)
+        prefix = '{}_{}_'.format(adv_type_list[(index % 4) // 2], isBatchRemove_list[index % 2])
+        df = pd.read_csv(os.path.join(path, prefix + metrics + '.csv'))
+
+        if metrics == 'distance':
+            markers = ['o' for i in range(7)]
+        else:
+            markers = ['o' for i in range(8)]
+        
+        if metrics == 'distance':
+            temp = sns.lineplot(
+                x='index',
+                y='value',
+                data=df,
+                style='method',
+                hue='method',
+                markers=markers,
+                dashes=False,
+                linewidth=1.5,
+                ax=ax,
+            )
+        else:
+            temp = sns.lineplot(
+                x='index',
+                y='value',
+                data=df,
+                style='method',
+                hue='method',
+                markers=markers,
+                dashes=False,
+                ci=None,
+                linewidth=1.5,
+                ax=ax,
+            )       
+
+        if metrics == 'distance':
+            plt.ylabel('Distance')
+        elif metrics == 'clean_acc':
+            plt.ylabel('Clean Accuracy')
+        elif metrics == 'perturbed_acc':
+            plt.ylabel('Perturbed Accuracy')
+            
+        plt.xlabel('Removal Numbers')
+        plt.title('{} {} BatchRemove type {}'.format(
+                dataset,
+                adv_type_list[(index % 4) // 2],
+                isBatchRemove_list[index % 2],
+            )
+        )
+
+        temp.set_title(ax.get_title(), size=14)
+        temp.set_ylabel(ax.get_ylabel(), size=14)
+        temp.set_xlabel(ax.get_xlabel(), size=14) 
+
+    plt.subplots_adjust(wspace=0.3, hspace=0.3)
+    plt.savefig('{}.pdf'.format(metrics), dpi=800, bbox_inches='tight', pad_inches=0.2)
+    print('Save Done !')
+    plt.close()
+
 if __name__ == "__main__":
-    args = args()
-    print(generate_save_name(args, 5000))
+
+    # for dataset in ['Cifar10', 'Cifar100', 'Lacuna-100']:
+    #     for adv_type in ['FGSM', 'PGD']:
+    #         for isBatchRemove in [0, 1]:
+    #             convert_df_save(args=args(dataset, adv_type, isBatchRemove))
+
+    FigPlot(metrics='distance')
+    FigPlot(metrics='clean_acc')
+    FigPlot(metrics='perturbed_acc')
