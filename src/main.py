@@ -98,57 +98,36 @@ else:
 
 dataer.set_sequence(sequence=resort_sequence)
 
-# neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
+neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
 
 # after pre save model, we could load model
-# neter.load_model('final_retrain_model_ten_0_times{}'.format(args.times))
+neter.load_model(generate_save_name(args, 0))
 
-# for extension expertiment
-# neter.load_model(generate_save_name(args, 0))
 
-# print('Train acc: {:.2f}%'.format(neter.test(isTrainset=True) * 100))
-# print('Test acc: {:.2f}%'.format(neter.test(isTrainset=False) * 100))
-# print('Adv Train test acc: {:.2f}%'.format(neter.test(isTrainset=True, isAttack=True)*100))
-# print('Adv Test acc: {:.2f}%'.format(neter.test(isTrainset=False, isAttack=True)*100))
 
-# neter.initialization(isCover=True)  # init generate the adv samples, inner output files.
+neter.initialization(isCover=True)  # init generate the adv samples, inner output files.
 
 sisaer = SISA(dataer=dataer, args=args, shards_num=args.shards, slices_num=5)
 # sisaer.Reload()
 sisaer.sisa_train(isAdv=True)
-# sisaer.sisa_remove(sequence=[17211, ], isTrain=True, isAdv=True)
 
 
-# test inner output acc 
-# print('clean train acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=True, isAdv=False) * 100))
-# print('adv train acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=True, isAdv=True) * 100))
+# ########
+# ### stage 2) pre calculate the matrix, store and load
+# ########
+if args.isBatchRemove == 1 or args.isBatchRemove == 2:
+    muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
+else:
+    muter = SchurMUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
 
-# print('clean test acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=False, isAdv=False) * 100))
-# print('adv test acc {:.2f}%'.format(neter.test_inner_out_acc(isTrain=False, isAdv=True) * 100))
+fmuter = FMuterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='FMUter', args=args)
 
-
-# # pre save model
-# time = neter.training(epochs=args.epochs, lr=args.lr, batch_size=args.batchsize, isAdv=True)
-# print('time {:.2f}'.format(time))
-# neter.save_model()
-
-
-# # ########
-# # ### stage 2) pre calculate the matrix, store and load
-# # ########
-# if args.isBatchRemove == 1 or args.isBatchRemove == 2:
-#     muter = MUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
-# else:
-#     muter = SchurMUterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='MUter', args=args)
-
-# fmuter = FMuterRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='FMUter', args=args)
-
-# newton_delta = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Newton_delta', args=args)
-# newton = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Newton', args=args)
-# influence_delta = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Influence_delta', args=args)
-# influence = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Influence', args=args)
-# fisher_delta = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Fisher_delta', args=args)
-# fisher = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Fisher', args=args)
+newton_delta = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Newton_delta', args=args)
+newton = NewtonRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Newton', args=args)
+influence_delta = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Influence_delta', args=args)
+influence = InfluenceRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Influence', args=args)
+fisher_delta = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=True, remove_method='Fisher_delta', args=args)
+fisher = FisherRemover(basic_neter=neter, dataer=dataer, isDelta=False, remove_method='Fisher', args=args)
 
 
 # ####
@@ -163,15 +142,11 @@ for index, remain_head in enumerate(remove_squence):
         remove_head = remove_squence[index - 1]
     print('Unlearning deomain [{} -- {})'.format(remove_head, remain_head))
 
-    ## 1) for retrain
-    # retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
-    # spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head)
-    # retrain_neter.load_model(generate_save_name(args, remain_head))
-    
-    # for extension expertiment
-    # retrain_neter.load_model('final_retrain_model_ten_{}_times0'.format(remain_head))
-
-    # recorder.metrics_time_record(method='Retrain', time=spending_time)
+    # 1) for retrain
+    retrain_neter = Neter(dataer=dataer, args=args, isTuning=args.isPretrain, pretrain_param=pretrain_param)
+    spending_time = retrain_neter.training(args.epochs, lr=args.lr, batch_size=args.batchsize, head=remain_head)
+    retrain_neter.load_model(generate_save_name(args, remain_head))
+    recorder.metrics_time_record(method='Retrain', time=spending_time)
 
     # 2) for SISA
     # under construction
@@ -186,10 +161,10 @@ for index, remain_head in enumerate(remove_squence):
     recorder.metrics_time_record(method='SISA', time=(end_time - start_time))
 
     # 3) for MUter
-    # unlearning_time = muter.Unlearning(head=remove_head, rear=remain_head)
+    unlearning_time = muter.Unlearning(head=remove_head, rear=remain_head)
 
-    # recorder.metrics_time_record(method=muter.remove_method, time=unlearning_time)
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=muter)
+    recorder.metrics_time_record(method=muter.remove_method, time=unlearning_time)
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=muter)
 
     # 3.1) for Fisher-MUter
     # fmuter_unlearning_time = fmuter.Unlearning(head=remove_head, rear=remain_head)
@@ -197,28 +172,28 @@ for index, remain_head in enumerate(remove_squence):
     # recorder.metrics_time_record(method=fmuter.remove_method+'{}'.format(remain_head), time=fmuter_unlearning_time)
     # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=fmuter)
 
-    # ## 4) for Newton_delta, Newton
-    # newton_delta.Unlearning(head=remove_head, rear=remain_head)
-    # newton.Unlearning(head=remove_head, rear=remain_head)
+    ## 4) for Newton_delta, Newton
+    newton_delta.Unlearning(head=remove_head, rear=remain_head)
+    newton.Unlearning(head=remove_head, rear=remain_head)
 
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=newton_delta)
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=newton)
-
-
-    # ## 5) for Influence_delta, Influence
-    # influence_delta.Unlearning(head=remove_head, rear=remain_head)
-    # influence.Unlearning(head=remove_head, rear=remain_head)
-
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=influence_delta)
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=influence)
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=newton_delta)
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=newton)
 
 
-    # ## 6) for Fisher_delta, Fisher
-    # fisher_delta.Unlearning(head=remove_head, rear=remain_head)
-    # fisher.Unlearning(head=remove_head, rear=remain_head)
+    ## 5) for Influence_delta, Influence
+    influence_delta.Unlearning(head=remove_head, rear=remain_head)
+    influence.Unlearning(head=remove_head, rear=remain_head)
 
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=fisher_delta)
-    # recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=fisher)
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=influence_delta)
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=influence)
+
+
+    ## 6) for Fisher_delta, Fisher
+    fisher_delta.Unlearning(head=remove_head, rear=remain_head)
+    fisher.Unlearning(head=remove_head, rear=remain_head)
+
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=fisher_delta)
+    recorder.log_metrics(retrain_neter=retrain_neter, compared_remover=fisher)
 
 
 # save information
